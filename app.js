@@ -75,6 +75,15 @@ app.get('/api/status', (req, res) => {
   res.json({ status: 'ok', version: '1.0.0', stats: { drafts: s.c, posts: p.c, trends: t.c } });
 });
 
+app.post('/api/trends/refresh', async (req, res) => {
+  try {
+    const results = await runTrendHunter();
+    res.json({ status: 'ok', count: results.length, trends: results });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/trends', (req, res) => {
   const rows = db.prepare("SELECT * FROM trends ORDER BY score DESC, created_at DESC LIMIT 50").all();
   res.json({ trends: rows });
@@ -174,7 +183,225 @@ app.use((req, res, next) => {
   next();
 });
 
-// Scheduler check every 15 minutes
+// ── Trend Hunter ──────────────────────────────────────────────────
+const BLACKLIST = ['k-pop','fanwar','fanbase','kazz','yoshi','dunk','joong',
+  'enhypen','bts','sk8er','yoxi','donutsmp'];
+
+function scoreTopic(topic, source) {
+  let score = source === 'trends24' ? 50 : 60;
+  // Boost for tech/business topics
+  if (/\b(ai|automation|tech|digital|startup|bisnis|ekonomi|work|karir|linkedin|personal.?branding|n8n|coding|programmer|software)\b/i.test(topic)) score += 30;
+  if (/tips|tutorial|cara|guide|belajar|panduan/i.test(topic)) score += 20;
+  if (/politik|presiden|menteri|pemerintah|parpol|nadiem|gibran|prabowo|menteri|kpk|korupsi/i.test(topic)) score -= 50;
+  if (/sepak.?bola|liga|club|fc|vs|madrid|barcelona|juventus|premier/i.test(topic)) score -= 30;
+  if (/kenaikan.*kristus|natal|idul.?fitri|imlek|nyepi/i.test(topic)) score -= 30;
+  if (/[\u3040-\u9fff\uac00-\ud7af]/.test(topic)) score -= 40; // CJK/Korean chars
+  if (BLACKLIST.some(b => topic.toLowerCase().includes(b))) score = 0;
+  return Math.max(0, Math.min(100, score));
+}
+
+async function scrapeTrends24() {
+  const resp = await fetch('https://trends24.in/indonesia/', {
+    headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36' }
+  });
+  const html = await resp.text();
+  // Extract trending topics from trends24 timeline
+  const matches = [...html.matchAll(/<a[^>]*href="[^"]*"[^>]*class=\s*"?[^"\s]*"?[^>]*>\s*([^<{][^<]{2,80}?)\s*<\/a>/g)];
+  const seen = new Set();
+  const topics = [];
+  for (const m of matches) {
+    const topic = m[1].trim().replace(/&\w+;/g, '').replace(/\s+/g, ' ').replace(/^\d+[. ]*/, '');
+    if (!topic || topic.length < 4 || seen.has(topic)) continue;
+    seen.add(topic);
+    const score = scoreTopic(topic, 'trends24');
+    if (score > 20) {
+      topics.push({ topic, source: 'trends24', score,
+        relevance: score > 70 ? 'high' : score > 40 ? 'medium' : 'low',
+        angle: /ai|tech|digital|automation/i.test(topic) ? 'thought leadership' :
+               /tips|tutorial|belajar/i.test(topic) ? 'tutorial' : 'general' });
+    }
+  }
+  return topics.slice(0, 25);
+}
+
+async function scrapeGoogleTrends() {
+  try {
+    const resp = await fetch('https://trends.google.com/trending?geo=ID&sort=trending', {
+      headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36' }
+    });
+    const html = await resp.text();
+    const matches = [...html.matchAll(/"title":\{"query":"([^"]+)"/g)];
+    const topics = [];
+    const seen = new Set();
+    for (const m of matches) {
+      const topic = m[1].trim();
+      if (!topic || seen.has(topic)) continue;
+      seen.add(topic);
+      const score = scoreTopic(topic, 'google_trends');
+      if (score > 20) {
+        topics.push({ topic, source: 'google_trends', score,
+          relevance: score > 70 ? 'high' : score > 40 ? 'medium' : 'low',
+          angle: 'general' });
+      }
+    }
+    return topics.slice(0, 15);
+  } catch { return []; }
+}
+
+async function runTrendHunter() {
+  console.log('[TrendHunter] Scraping trends...');
+  const [t24, gt] = await Promise.allSettled([scrapeTrends24(), scrapeGoogleTrends()]);
+  const all = [];
+  if (t24.status === 'fulfilled') all.push(...t24.value);
+  if (gt.status === 'fulfilled') all.push(...gt.value);
+
+  // Dedup by normalized topic
+  const seen = new Set();
+  const unique = [];
+  for (const t of all) {
+    const key = t.topic.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(t);
+  }
+
+  // Sort by score descending
+  unique.sort((a, b) => b.score - a.score);
+
+  // Save top 30 to DB
+  const stmt = db.prepare("INSERT OR IGNORE INTO trends (topic,source,score,relevance,angle) VALUES (?,?,?,?,?)");
+  let saved = 0;
+  for (const t of unique.slice(0, 30)) {
+    try {
+      stmt.run(t.topic, t.source, t.score, t.relevance, t.angle);
+      saved++;
+    } catch(e) { /* dup */ }
+  }
+  console.log(`[TrendHunter] Saved ${saved} trends`);
+  return unique.slice(0, 10);
+}
+
+// ── Copywriter ────────────────────────────────────────────────────
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+
+function loadKnowledgeBase() {
+  const profilePath = path.join(BASE, 'knowledge_base', 'profile.json');
+  const voicePath = path.join(BASE, 'knowledge_base', 'brand_voice.json');
+  const profile = fs.existsSync(profilePath) ? JSON.parse(fs.readFileSync(profilePath, 'utf8')) : {};
+  const voice = fs.existsSync(voicePath) ? JSON.parse(fs.readFileSync(voicePath, 'utf8')) : {};
+  return { profile, voice };
+}
+
+function humanize(text) {
+  const patterns = [
+    ['Dalam era digital yang semakin maju', 'Dunia digital sekarang'],
+    ['Tidak dapat dipungkiri bahwa', 'Gak bisa dipungkiri'],
+    ['Perlu diingat bahwa', 'Inget aja'],
+    ['Sangat penting untuk', 'Penting banget buat'],
+    ['Mari kita bahas lebih dalam', 'Yuk kita bedah'],
+    ['Berdasarkan pengalaman saya', 'Dari pengalaman gue'],
+    ['Dapat disimpulkan bahwa', 'Intinya'],
+    ['Oleh karena itu', 'Makanya'],
+    ['Ke depannya', 'Ke depan'],
+    ['Hal ini dikarenakan', 'Soalnya'],
+    ['Merupakan sebuah', 'Adalah'],
+    ['Terdapat beberapa', 'Ada beberapa'],
+  ];
+  let result = text;
+  for (const [old, neu] of patterns) {
+    result = result.replace(new RegExp(old.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), neu);
+  }
+  return result;
+}
+
+function brandCoachScore(draft, profile, voice) {
+  let score = 7;
+  if (draft.length > 300) score += 1;
+  if (draft.length > 800) score += 1;
+  if (draft.includes('?') || draft.includes('kamu') || draft.includes('lo')) score += 1;
+  if (/gue|saya|aku/.test(draft)) score += 1;
+  if (/politik|presiden|menteri/.test(draft)) score -= 3;
+  if (draft.length < 200) score -= 2;
+  return Math.max(1, Math.min(10, score));
+}
+
+app.post('/api/draft/generate-ai', async (req, res) => {
+  try {
+    const { topic_id, topic, tone } = req.body;
+    const { profile, voice } = loadKnowledgeBase();
+    const brandVoice = voice.tone?.primary || tone || 'professional-santai';
+    const displayName = profile.personal_info?.display_name || 'Personal Branding Expert';
+    const headline = profile.personal_info?.headline || '';
+
+    // Build prompt
+    const prompt = `Kamu adalah ${displayName} (${headline}). 
+Tone: ${brandVoice}, natural, storytelling.
+Bahasa: Indonesia, seperti ngobrol santai tapi profesional.
+Topik: ${topic || 'personal branding'}
+
+Buat DRAFT LINKEDIN (max 1000 karakter):
+- Hook baris pertama bikin penasaran
+- Ada sudut pandang pribadi / pengalaman
+- Kasih value atau insight
+- Akhiri dengan pertanyaan diskusi
+- JANGAN pake klise
+
+Tambahkan 3-5 hashtag di baris terakhir.
+Output: {"body": "...", "hashtags": "..."}`;
+
+    let draftBody = '';
+    let hashtags = '#PersonalBranding #LinkedIn';
+
+    if (OPENAI_API_KEY) {
+      const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + OPENAI_API_KEY,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 800,
+          temperature: 0.8
+        })
+      });
+      const data = await resp.json();
+      const raw = data.choices?.[0]?.message?.content || '';
+      try {
+        const parsed = JSON.parse(raw);
+        draftBody = parsed.body || raw;
+        hashtags = parsed.hashtags || hashtags;
+      } catch {
+        draftBody = raw;
+      }
+    } else {
+      // Fallback template
+      draftBody = `[AI Copywriter: set OPENAI_API_KEY di .env untuk generate otomatis]\n\nTopik: ${topic || 'personal branding'}\n\n${topic ? 'Ngomong-ngomong soal ' + topic + ', gue ada beberapa pemikiran...' : 'Gue mau bagi pengalaman tentang personal branding di LinkedIn...'}\n\nYang gue pelajari: konsistensi dan autentisitas itu jauh lebih penting daripada posting setiap hari. Lebih baik 2 post berkualitas per minggu daripada 7 post yang gak jelas.`;
+    }
+
+    // Humanize
+    const humanized = humanize(draftBody);
+
+    // Brand Coach scoring
+    const score = brandCoachScore(humanized, profile, voice);
+
+    // Save to drafts
+    const r = db.prepare("INSERT INTO drafts (topic_id, body, hashtags, status, score) VALUES (?,?,?,?,?)")
+      .run(topic_id || null, humanized, hashtags, score >= 6 ? 'draft' : 'draft', score);
+
+    res.status(201).json({
+      id: r.lastInsertRowid,
+      body: humanized,
+      hashtags,
+      score,
+      status: score >= 6 ? 'draft' : 'needs_review',
+      humanized_from: OPENAI_API_KEY ? 'openai' : 'template'
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 function scheduledPost() {
   console.log('[scheduler] Checking for drafts to post...');
   const now = new Date().toISOString().substring(0, 16);
