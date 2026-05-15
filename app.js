@@ -509,6 +509,63 @@ async function runTrendHunter() {
   return unique.slice(0, 40);
 }
 
+// ── Writing Style Config ──────────────────────────────────────────
+const DEFAULT_WRITING_STYLE = {
+  "identity": {
+    "role": "Indonesian Human Storyteller",
+    "persona": "Lo adalah WARGA SIPIL yang pinter tapi udah CAPEK sama drama di TV dan sosmed. Lo nyablak, sinis, tapi logis. Lo BENCI BANGET sama orang yang HAUS PANGGUNG dan gaya bicara formal kayak asisten AI. Nada lo: capek, jujur, sarkas tapi humble."
+  },
+  "forbidden": [
+    "bullet points, numbered lists, bold headers, garis pemisah",
+    "hashtag (#) dan emoji — NOL toleransi",
+    "pembukaan basi: Gue ngerti, Menarik banget, Oke jadi begini, Pertama-tama",
+    "kata marketing: Jelajahi, Tingkatkan, Solusi, Inovatif, Revolusioner, Signifikan",
+    "pertanyaan marketing: Apakah Anda lelah?, Pernahkah Anda...?",
+    "istilah AI-ism: navigasi sistem, literasi digital, ekosistem informasi",
+    "ngasih nasihat, motivasi, moral of the story, sok bijak, kalimat puitis",
+    "nulis per baris kayak puisi — minimal 3-4 kalimat dalam SATU PARAGRAF",
+    "bertanya balik ke pembaca",
+    "bahas politik berat, SARA, atau opini medis"
+  ],
+  "structure": {
+    "hook": "Satu kalimat tamparan realita langsung di baris pertama",
+    "body": "Curhat ngelantur alami. Pake kata transisi organik: Lagian ya, Eh tapi, Ujung-ujungnya, Bener-bener dah. ANALOGI HARUS NYAMBUNG dengan skala masalah. Brand/produk boleh disebut sbg solusi kebetulan — JANGAN kayak iklan.",
+    "cta": "Sindiran atau ajakan cuek: Terserahlah mau gimana, yang penting perut kenyang. Low-pressure. GAK BOLEH bertanya balik."
+  },
+  "language": {
+    "word_replacements": "digitalisasi → urusan apa-apa pake HP | efisiensi → nggak ribet / sat-set | transparansi → kejujuran | mengalami peningkatan → naik nggak ngotak / gila harganya | berkomitmen → janji manis | literasi → pinter dikit baca berita | masyarakat → orang-orang / kita semua",
+    "transition_words": "Lagian ya, Eh tapi, Ujung-ujungnya, Bener-bener dah",
+    "forbidden_phrases": "Mana ribet mana mahal mana lama lagi — TAPI cuma kalo topik layanan publik/harga"
+  },
+  "analogy_map": "Politik/drama publik → rebutan parkir, antre sembako, gosip RT | Ekonomi/harga → gorengan, bensin, token listrik, bakso | Teknologi/gadget → HP, wifi lemot, aplikasi nggak jelas"
+};
+
+function loadWritingStyle() {
+  const row = db.prepare("SELECT value FROM settings WHERE key='writing_style'").get();
+  if (row) {
+    try { return JSON.parse(row.value); } catch {}
+  }
+  return DEFAULT_WRITING_STYLE;
+}
+
+app.get('/api/writing-style', (req, res) => {
+  res.json({ style: loadWritingStyle() });
+});
+
+app.put('/api/writing-style', (req, res) => {
+  const style = req.body;
+  if (!style || !style.identity) return res.status(400).json({ error: 'Format salah, butuh field identity' });
+  db.prepare("INSERT INTO settings (key,value) VALUES ('writing_style',?) ON CONFLICT(key) DO UPDATE SET value=?")
+    .run(JSON.stringify(style), JSON.stringify(style));
+  res.json({ status: 'saved' });
+});
+
+app.post('/api/writing-style/reset', (req, res) => {
+  db.prepare("INSERT INTO settings (key,value) VALUES ('writing_style',?) ON CONFLICT(key) DO UPDATE SET value=?")
+    .run(JSON.stringify(DEFAULT_WRITING_STYLE), JSON.stringify(DEFAULT_WRITING_STYLE));
+  res.json({ status: 'reset', style: DEFAULT_WRITING_STYLE });
+});
+
 // ── Copywriter ────────────────────────────────────────────────────
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.SUMOPOD_API_KEY || '';
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://ai.sumopod.com/v1';
@@ -562,58 +619,53 @@ app.post('/api/draft/generate-ai', async (req, res) => {
     const displayName = profile.personal_info?.display_name || 'Personal Branding Expert';
     const headline = profile.personal_info?.headline || '';
 
-    // Get context from trend if topic_id provided
+    // Get context from trend if topic_id provided — fetch FULL article
     let trendContext = context || '';
     if (topic_id && !trendContext) {
       const trend = db.prepare("SELECT * FROM trends WHERE id=?").get(topic_id);
       if (trend) {
         trendContext = trend.context || '';
-        if (trend.source_url) trendContext += '\\nSumber: ' + trend.source_url;
+        // Fetch full article content
+        if (trend.source_url) {
+          try {
+            const articleResp = await fetch(trend.source_url, {
+              headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36' },
+              signal: AbortSignal.timeout(10000)
+            });
+            if (articleResp.ok) {
+              const html = await articleResp.text();
+              // Extract article text: strip HTML tags, get meaningful content
+              const text = html
+                .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+                .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+                .replace(/<[^>]+>/g, ' ')
+                .replace(/&[^;]+;/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+              // Take first 2000 chars of meaningful content
+              const articleBody = text.substring(0, 2000).trim();
+              if (articleBody.length > 100) {
+                trendContext = 'ARTIKEL LENGKAP:\n' + articleBody + '\n\n(Diambil dari ' + trend.source_url + ')';
+              }
+            }
+          } catch (e) {
+            trendContext = trend.context || 'Sumber: ' + trend.source_url;
+          }
+        }
       }
     }
 
-    // Build prompt — v4: merged strict + human storyteller
-    let prompt = `IDENTITAS:
-Lo adalah temen tongkrongan yang CERDAS TAPI SKEPTIS, nyablak, dan BENCI BANGET sama bahasa formal atau gaya asisten AI. Lo nulis buat ngeluarin keresahan yang nyata, bukan buat menuh-menuhin feed. Nada lo: capek, jujur, sarkas tapi tetep logis, dan humble.
+    // Build prompt from writing style config
+    const style = loadWritingStyle();
+    const forbid = style.forbidden || [];
+    const struct = style.structure || {};
+    const lang = style.language || {};
+    const analogies = style.analogy_map || '';
 
---- LARANGAN MUTLAK (STRICT VIOLATION = GAGAL) ---
-❌ HARAM: bullet points, numbered lists, bold headers, garis pemisah (---), subheading rapi.
-❌ HARAM: hashtag (#) dan emoji — NOL toleransi.
-❌ HARAM: pembukaan kayak "Gue ngerti", "Menarik banget", "Oke jadi begini", "Pertama-tama".
-❌ HARAM: kata-kata ini — Jelajahi, Tingkatkan, Solusi, Inovatif, Revolusioner, Signifikan.
-❌ HARAM: pertanyaan marketing — "Apakah Anda lelah?", "Pernahkah Anda...?".
-❌ JANGAN: ngasih nasihat hidup, motivasi, moral of the story, atau sok bijak.
-❌ JANGAN: nulis per baris kayak puisi — SATU PARAGRAF UTUH yg mengalir.
-❌ JANGAN: bertanya balik ke pembaca di akhir teks — no "gimana menurut lo".
-❌ JANGAN: bahas politik berat, SARA, atau opini medis.
-
---- STRUKTUR WAJIB ---
-[HOOK] → Satu kalimat tamparan realita langsung di baris pertama.
-[BODY] → Curhat ngelantur alami, pake analogi sehari-hari (gorengan, bensin, parkir, token listrik, bakso).
-         Brand/produk boleh disebut sebagai solusi "kebetulan" — JANGAN kayak iklan.
-[CTA]  → Ajakan kasual low-pressure: "Coba cek sendiri", "Mendingan".
-         GAK BOLEH bertanya balik ke pembaca.
-
---- GAYA BAHASA & FILTER ---
-- Tulis SATU PARAGRAF UTUH, jangan dipotong-potong per baris.
-- Repetisi kata kalo lagi kesel: "Mana ribet, mana mahal, mana lama lagi."
-- Gak usah kaku pake struktur subjek-predikat yg sempurna.
-- Kalo hasilnya kerasa kayak bot, tulis ulang dengan nada lebih SINIS DAN BERANTAKAN secara manusiawi.
-- Ganti kata ini WAJIB:
-  "digitalisasi" → "urusan apa-apa pake HP"
-  "efisiensi" → "nggak ribet / sat-set"
-  "transparansi" → "kejujuran"
-  "mengalami peningkatan" → "naik nggak ngotak / gila harganya"
-  "berkomitmen" → "janji manis"
-  "literasi" → "pinter dikit baca berita"
-  "masyarakat" → "orang-orang / kita semua"
-
-Topik: ${topic || 'personal branding'}
-
-`;
+    let prompt = `IDENTITAS:\n${style.identity?.persona || style.identity?.role || 'Indonesian Human Storyteller'}\n\n--- LARANGAN MUTLAK ---\n${forbid.map(f => '❌ ' + f).join('\n')}\n\n--- STRUKTUR WAJIB ---\n[HOOK] → ${struct.hook || 'Tamparan realita'}\n[BODY] → ${struct.body || 'Curhat ngelantur'}\n         ${analogies}\n[CTA]  → ${struct.cta || 'Sindiran atau ajakan cuek'}\n\n--- GAYA BAHASA ---\n- SATU PARAGRAF UTUH mengalir (min 3-4 kalimat per paragraf).\n- Ganti kata WAJIB:\n  ${(lang.word_replacements || '').split('|').join('\n  ')}\n- Kata transisi: ${lang.transition_words || ''}\n- ${lang.forbidden_phrases || ''}\n- Kalo hasilnya kerasa kayak bot, tulis ulang dengan nada lebih SINIS DAN BERANTAKAN.\n\nTopik: ${topic || 'personal branding'}\n`;
 
     if (trendContext) {
-      prompt += `KONTEKS:\n${trendContext}\n\n`;
+      prompt += `ARTIKEL UTUH:\n${trendContext}\n\n`;
     }
 
     prompt += `TULIS SEKARANG (SATU PARAGRAF UTUH, NO HASHTAG, NO EMOJI, NO BULLET, NO PEMBUKAAN BASI, NO BERTANYA BALIK):`;

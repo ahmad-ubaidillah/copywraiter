@@ -28,17 +28,19 @@ async function render() {
 }
 
 async function fetchData() {
-  const [s, t, d, h, p, st] = await Promise.all([
+  const [s, t, d, h, p, st, ws] = await Promise.all([
     fetch('/api/status').then(r=>r.json()),
     fetch('/api/trends').then(r=>r.json()),
     fetch('/api/drafts').then(r=>r.json()),
     fetch('/api/history').then(r=>r.json()),
     fetch('/api/profile').then(r=>r.json()),
-    fetch('/api/settings').then(r=>r.json())
+    fetch('/api/settings').then(r=>r.json()),
+    fetch('/api/writing-style').then(r=>r.json()).catch(()=>({}))
   ]);
   state.status = s; state.trends = t.trends || [];
   state.drafts = d.drafts || []; state.posts = h.posts || [];
   state.profile = p.profile || {}; state.settings = st;
+  state.writingStyle = ws.style || {};
   $('statusBadge').textContent = '● ' + (s.status || 'unknown');
   $('footerStats').textContent = state.drafts.length + ' drafts · ' + state.posts.length + ' posted';
 }
@@ -193,15 +195,16 @@ function showGenerateForm() {
 async function generateAIDraft() {
   const topic = $('draftTopic').value;
   const tone = $('draftTone').value;
-  main.innerHTML = '<div class="loader"><div class="spinner"></div><p>AI menulis draft...</p></div>';
+  main.innerHTML = '<div class="loader"><div class="spinner"></div><p>Membaca berita & nulis draft...</p></div>';
   try {
     const r = await fetch('/api/draft/generate-ai', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({topic, tone})
     });
     const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Gagal');
     await fetchData();
-    route('drafts');
+    previewDraft(d.id);
   } catch(e) {
     main.innerHTML = `<div class="empty"><h2>Error</h2><p>${e.message}</p></div>`;
   }
@@ -312,7 +315,41 @@ function renderSettings() {
       </div>
     </div>
     <div class="card">
-      <div class="card-title">Brand Voice</div>
+      <div class="card-title">Writing Style</div>
+      <div id="writingStyleStatus"></div>
+      <div class="form-group">
+        <label class="form-label">Persona (identity)</label>
+        <textarea id="wsPersona" rows="3">${state.writingStyle?.identity?.persona || ''}</textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Larangan (pisahkan dengan koma)</label>
+        <textarea id="wsForbidden" rows="4">${(state.writingStyle?.forbidden||[]).join(',\n')}</textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Hook</label>
+        <input type="text" id="wsHook" value="${esc(state.writingStyle?.structure?.hook||'')}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Body</label>
+        <textarea id="wsBody" rows="3">${esc(state.writingStyle?.structure?.body||'')}</textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">CTA</label>
+        <input type="text" id="wsCTA" value="${esc(state.writingStyle?.structure?.cta||'')}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Word Replacements (format: kata_asli → kata_ganti | ...)</label>
+        <input type="text" id="wsWords" value="${esc(state.writingStyle?.language?.word_replacements||'')}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Analogy Map</label>
+        <input type="text" id="wsAnalogy" value="${esc(state.writingStyle?.analogy_map||'')}">
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-primary btn-sm" onclick="return saveWritingStyle()">Save Style</button>
+        <button class="btn btn-sm" onclick="return resetWritingStyle()">Reset Default</button>
+      </div>
+    </div>
       <div class="form-group"><label class="form-label">Tone</label><input type="text" id="sTone" value="${state.settings.tone||'professional-santai'}"></div>
       <div class="form-group"><label class="form-label">Posting Times (comma-separated, 24h)</label><input type="text" id="sTimes" value="${state.settings.post_times||'07:00,19:00'}"></div>
       <div class="form-group"><label class="form-label">Max Posts / Day</label><input type="number" id="sMax" value="${state.settings.max_posts||'2'}"></div>
@@ -339,8 +376,32 @@ async function saveSettings() {
     max_posts: $('sMax').value
   };
   await fetch('/api/settings', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  // Save writing style too
+  const ws = {
+    identity: { role: 'Custom', persona: $('wsPersona').value },
+    forbidden: $('wsForbidden').value.split('\n').map(s=>s.trim()).filter(Boolean),
+    structure: {
+      hook: $('wsHook').value,
+      body: $('wsBody').value,
+      cta: $('wsCTA').value
+    },
+    language: {
+      word_replacements: $('wsWords').value,
+      transition_words: '',
+      forbidden_phrases: ''
+    },
+    analogy_map: $('wsAnalogy').value
+  };
+  await fetch('/api/writing-style', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(ws)});
   await fetchData();
-  alert('Settings saved');
+  alert('Settings & Writing Style saved');
+}
+
+async function resetWritingStyle() {
+  if (!confirm('Reset writing style ke default?')) return;
+  await fetch('/api/writing-style/reset', {method:'POST'});
+  await fetchData();
+  route('settings');
 }
 
 async function checkLinkedIn() {
@@ -369,6 +430,11 @@ async function connectLinkedIn() {
 function previewDraft(id) {
   const draft = state.drafts.find(d => d.id === id);
   if (!draft) return;
+  // Find related trend for source article link
+  const trend = state.trends.find(t => draft.topic_id === t.id || (draft.topic && t.topic && draft.topic.includes(t.topic.substring(0,30))));
+  const sourceInfo = trend?.source_url ? `<div style="margin-top:16px;padding:12px;background:var(--bg2);border-radius:var(--radius);font-size:.8rem;color:var(--text2)">
+    <strong>Sumber:</strong> <a href="${escAttr(trend.source_url)}" target="_blank">${esc(trend.source)} — ${esc(trend.topic)}</a>
+  </div>` : '';
   main.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <h2>${esc(draft.topic || 'Draft')}</h2>
@@ -389,20 +455,24 @@ ${esc(draft.body)}
       <div style="margin-top:16px;display:flex;gap:8px">
         ${actionButtons(draft)}
       </div>
+      ${sourceInfo || ''}
     </div>
   `;
 }
 
 /* ── Actions from Trends ── */
 async function generateDraft(topicId, topicName) {
-  main.innerHTML = '<div class="loader"><div class="spinner"></div><p>AI menulis draft...</p></div>';
+  main.innerHTML = '<div class="loader"><div class="spinner"></div><p>Membaca artikel...</p></div>';
   try {
     const r = await fetch('/api/draft/generate-ai', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({topic_id:topicId, topic:topicName})
     });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Gagal generate');
     await fetchData();
-    route('drafts');
+    // Show preview immediately
+    previewDraft(d.id);
   } catch(e) {
     main.innerHTML = `<div class="empty"><h2>Error</h2><p>${e.message}</p></div>`;
   }
