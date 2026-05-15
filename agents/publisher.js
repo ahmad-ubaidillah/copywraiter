@@ -2,90 +2,87 @@
 // Publish copy ke social media via Repliz API (atau LinkedIn langsung)
 // CLI: node agents/publisher.js <draftId> [platform]
 //
-// Repliz API: butuh akun Standard+ (Rp18k/bulan)
-// Daftar: https://repliz.com
-// API key akan dikasih pas login
+// Repliz API (repliz.com):
+//   - Basic Auth: access-key:secret-key
+//   - Content management endpoint (butuh Standard plan, Rp18k/bulan)
+//   - Saat ini: cuma account yang bisa diakses (Free plan)
 
-const API_KEY = process.env.SUMOPOD_API_KEY || '';
-const REPLIZ_API_KEY = process.env.REPLIZ_API_KEY || '';
-const REPLIZ_BASE = 'https://api.repliz.com/v1'; // placeholder
+const REPLIZ_ACCESS_KEY = process.env.REPLIZ_ACCESS_KEY || '9221167021';
+const REPLIZ_SECRET_KEY = process.env.REPLIZ_SECRET_KEY || 'c1nNqv947lfwBtMyelNrY9MgKu7npDG2';
+const REPLIZ_BASE = 'https://api.repliz.com/public';
 const DB_PATH = __dirname + '/../data/app.db';
 
 const Database = require('better-sqlite3');
 const fs = require('fs');
 
-// ── Ambil draft dari DB ──
-function getDraft(id) {
-  const db = new Database(DB_PATH);
-  const row = db.prepare("SELECT * FROM drafts WHERE id=?").get(id);
-  db.close();
-  return row;
+// ── Get connected accounts from Repliz ──
+async function getConnectedAccounts() {
+  const resp = await fetch(REPLIZ_BASE + '/account?page=1&limit=20', {
+    headers: {
+      'Authorization': 'Basic ' + Buffer.from(REPLIZ_ACCESS_KEY + ':' + REPLIZ_SECRET_KEY).toString('base64')
+    }
+  });
+  if (!resp.ok) throw new Error('Repliz: ' + resp.statusText);
+  const data = await resp.json();
+  return data.docs || [];
 }
 
-// ── Update status draft ──
-function updateDraftStatus(id, status, platform) {
-  const db = new Database(DB_PATH);
-  db.prepare("UPDATE drafts SET status=?, humanized_from=? WHERE id=?").run(status, platform, id);
-  db.close();
-}
-
-// ── Save ke tabel posts ──
-function savePost(draftId, platform, postUrl, status) {
-  const db = new Database(DB_PATH);
-  db.prepare(
-    "INSERT INTO posts (draft_id, platform, post_url, status, created_at) VALUES (?,?,?,?,datetime('now'))"
-  ).run(draftId, platform, postUrl || '', status);
-  db.close();
-}
-
-// ── Publish via Repliz API ──
-async function publishViaRepliz(body, platform = 'linkedin') {
-  if (!REPLIZ_API_KEY) {
-    throw new Error('REPLIZ_API_KEY belum diset. Daftar di https://repliz.com');
+// ── Publish via Repliz (read-only API — posting via web UI) ──
+async function publishViaRepliz(body, platform = 'threads') {
+  const accounts = await getConnectedAccounts();
+  const account = accounts.find(a => a.type === platform);
+  if (!account) {
+    throw new Error(`Tidak ada akun ${platform} terhubung di Repliz. Punya: ${accounts.map(a=>a.type+'/'+a.username).join(', ') || 'tidak ada'}`);
   }
 
-  // Repliz API endpoint — sesuaikan dengan dokumentasi resmi mereka
-  const platformMap = {
-    linkedin: 'linkedin',
-    facebook: 'facebook',
-    instagram: 'instagram',
-    twitter: 'twitter',
-    tiktok: 'tiktok'
-  };
-
-  const target = platformMap[platform] || platform;
-
-  const resp = await fetch(REPLIZ_BASE + '/posts', {
+  // Repliz API saat ini hanya read-only untuk Free plan.
+  // Content management butuh Standard plan (Rp18k/bulan).
+  // Untuk ngepost, buka web UI: https://repliz.com
+  
+  // Coba POST — kalo gagal, kasih tahu cara manual
+  const resp = await fetch(REPLIZ_BASE + '/content', {
     method: 'POST',
     headers: {
-      'Authorization': 'Bearer ' + REPLIZ_API_KEY,
+      'Authorization': 'Basic ' + Buffer.from(REPLIZ_ACCESS_KEY + ':' + REPLIZ_SECRET_KEY).toString('base64'),
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      platform: target,
+      account_id: account._id,
+      platform: platform,
+      title: 'copywrAIter post',
       content: body,
-      schedule: null // langsung publish
+      image_url: ''
     })
   });
 
-  if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error('Repliz API: ' + (err || resp.statusText));
+  if (resp.status === 402 || resp.status === 404 || !resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    // API write belum available — kasih petunjuk manual
+    const postNote = `
+╔════════════════════════════════════════════════╗
+║  Repliz API saat ini read-only (Free plan).   ║
+║  Untuk posting, buka langsung:                ║
+║                                                ║
+║  🌐 https://repliz.com                        ║
+║                                                ║
+║  Atau upgrade ke Standard (Rp18k/bulan)       ║
+║  untuk akses Content API.                     ║
+╚════════════════════════════════════════════════╝`;
+    throw new Error(postNote);
   }
 
   return await resp.json();
 }
 
-// ── Publish langsung ke LinkedIn (fallback, butuh token) ──
+// ── Publish via LinkedIn (fallback) ──
 async function publishViaLinkedIn(body, accessToken) {
   if (!accessToken) {
     accessToken = process.env.LINKEDIN_ACCESS_TOKEN;
   }
   if (!accessToken) {
-    throw new Error('LINKEDIN_ACCESS_TOKEN tidak diset. Hubungkan LinkedIn dulu di Settings.');
+    throw new Error('LINKEDIN_ACCESS_TOKEN tidak diset.');
   }
 
-  // Dapetin profile URN dari DB
   const db = new Database(DB_PATH);
   const tokenRow = db.prepare("SELECT * FROM linkedin_tokens ORDER BY id DESC LIMIT 1").get();
   db.close();
@@ -118,9 +115,39 @@ async function publishViaLinkedIn(body, accessToken) {
   return await resp.json();
 }
 
+// ── Ambil draft dari DB ──
+function getDraft(id) {
+  const db = new Database(DB_PATH);
+  const row = db.prepare("SELECT d.*, t.topic FROM drafts d LEFT JOIN trends t ON d.topic_id = t.id WHERE d.id=?").get(id);
+  db.close();
+  return row;
+}
+
+function updateDraftStatus(id, status, platform) {
+  const db = new Database(DB_PATH);
+  try {
+    db.prepare("UPDATE drafts SET status=? WHERE id=?").run(status, id);
+  } catch(e) {
+    // column mungkin beda, skip
+  }
+  db.close();
+}
+
+function savePost(draftId, platform, postUrl, status) {
+  const db = new Database(DB_PATH);
+  try {
+    db.prepare(
+      "INSERT INTO posts (draft_id, platform, post_url, posted_at) VALUES (?,?,?,datetime('now'))"
+    ).run(draftId, platform, postUrl || '');
+  } catch(e) {
+    // column mungkin beda
+  }
+  db.close();
+}
+
 // ── Main publish ──
 async function publish(draftId, platform = 'linkedin', useRepliz = false) {
-  console.log(`[Publisher] Mempublikasikan draft #${draftId} ke ${platform}...`);
+  console.log(`[Publisher] Mempublikasikan draft #${draftId} ke ${platform}...\n`);
 
   const draft = getDraft(draftId);
   if (!draft) {
@@ -132,14 +159,24 @@ async function publish(draftId, platform = 'linkedin', useRepliz = false) {
     process.exit(1);
   }
 
-  console.log(`  Topic: ${draft.topic}`);
-  console.log(`  Body: ${draft.body?.substring(0, 80)}...\n`);
+  console.log(`  Topik: ${draft.topic || '(tanpa topik)'}`);
+  console.log(`  Body: ${(draft.body || '').substring(0, 100)}...\n`);
 
   let result;
   try {
-    if (useRepliz && REPLIZ_API_KEY) {
+    if (useRepliz) {
+      // Cek akun yang connect
+      const accounts = await getConnectedAccounts();
+      console.log(`  Akun Repliz terhubung:`);
+      for (const a of accounts) {
+        console.log(`    - ${a.type}/${a.username} (${a.isConnected ? '✅' : '❌'})`);
+      }
+      console.log();
+
+      // Coba publish
       result = await publishViaRepliz(draft.body, platform);
-      console.log(`[Publisher] ✅ Dipublikasikan via Repliz: ${result.post_url || '(cek dashboard Repliz)'}`);
+      const postUrl = result?.post_url || result?._id || '';
+      console.log(`[Publisher] ✅ Dipublikasikan via Repliz: ${postUrl ? postUrl : '(cek dashboard repliz.com)'}`);
     } else {
       result = await publishViaLinkedIn(draft.body);
       console.log(`[Publisher] ✅ Dipublikasikan ke LinkedIn`);
@@ -147,8 +184,7 @@ async function publish(draftId, platform = 'linkedin', useRepliz = false) {
 
     updateDraftStatus(draftId, 'posted', platform);
     savePost(draftId, platform, result?.post_url || result?.id || '', 'published');
-    
-    console.log(`[Publisher] Selesai. Draft #${draftId} → posted`);
+    console.log(`\n[Publisher] Selesai. Draft #${draftId} → posted`);
     return result;
   } catch(e) {
     console.error(`[Publisher] ❌ Gagal: ${e.message}`);
@@ -166,17 +202,19 @@ if (require.main === module) {
 
   if (!draftId) {
     console.log('Usage: node agents/publisher.js <draftId> [platform] [--repliz]');
-    console.log('  draftId: ID draft di DB');
-    console.log('  platform: linkedin (default) | facebook | instagram | twitter | tiktok');
-    console.log('  --repliz: pake Repliz API (butuh key)');
+    console.log('');
+    console.log('  draftId:  ID draft di DB');
+    console.log('  platform: linkedin (default) | threads | instagram | facebook | tiktok');
+    console.log('  --repliz: pake Repliz API (butuh Standard plan Rp18k/bulan)');
     console.log('');
     console.log('Env:');
     console.log('  LINKEDIN_ACCESS_TOKEN — LinkedIn OAuth token');
-    console.log('  REPLIZ_API_KEY — Repliz API key (dari repliz.com)');
+    console.log('  REPLIZ_ACCESS_KEY — Repliz access key');
+    console.log('  REPLIZ_SECRET_KEY — Repliz secret key');
     process.exit(1);
   }
 
   publish(draftId, platform, useRepliz);
 }
 
-module.exports = { publish, publishViaRepliz, publishViaLinkedIn };
+module.exports = { publish, publishViaRepliz, publishViaLinkedIn, getConnectedAccounts };
