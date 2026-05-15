@@ -21,10 +21,17 @@ db.exec(`
     topic TEXT NOT NULL,
     source TEXT NOT NULL DEFAULT 'manual',
     score INTEGER DEFAULT 0,
-    relevance TEXT DEFAULT '',
-    angle TEXT DEFAULT '',
+    source_url TEXT DEFAULT '',
+    context TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now'))
   );
+`);
+
+// Migrate old DB — add columns if missing
+try { db.exec("ALTER TABLE trends ADD COLUMN source_url TEXT DEFAULT ''"); } catch(e) {}
+try { db.exec("ALTER TABLE trends ADD COLUMN context TEXT DEFAULT ''"); } catch(e) {}
+
+db.exec(`
   CREATE TABLE IF NOT EXISTS drafts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     topic_id INTEGER REFERENCES trends(id),
@@ -311,27 +318,67 @@ const LOCATIONS = new Set([
 const NEWS_SOURCES = [
   {
     url: 'https://www.kompas.com/tren',
-    selector: '<h[23][^>]*class="[^"]*tren[^"]*"[^>]*>([^<]{15,200}?)<\\/h[23]>',
+    selector: '<h[23][^>]*class="[^"]*tren[^"]*"[^>]*>\\s*<a[^>]*href="([^"]*)"[^>]*>([^<]{15,200}?)<\\/a>\\s*<\\/h[23]>',
     name: 'kompas',
-    minLen: 15
+    minLen: 15,
+    titleGroup: 2,
+    urlGroup: 1
   },
   {
     url: 'https://www.detik.com/terpopuler',
-    selector: '<article[^>]*>[\\s\\S]*?<a[^>]*href="[^"]*detik\\.com/[^"]*"[^>]*>([^<]{20,200}?)<\\/a>',
+    selector: '<article[^>]*>[\\s\\S]*?<a[^>]*href="([^"]*detik\\.com[^"]*)"[^>]*>([^<]{20,200}?)<\\/a>',
     name: 'detik',
-    minLen: 20
+    minLen: 20,
+    titleGroup: 2,
+    urlGroup: 1
   },
   {
     url: 'https://getdaytrends.com/indonesia/',
-    selector: '<a class="string"[^>]*>([^<]+)<\\/a>',
-    name: 'getdaytrends',
-    minLen: 3
+    selector: '<a class="string"[^>]*href="([^"]*)"[^>]*>([^<]+)<\\/a>',
+    name: 'twitter',
+    minLen: 3,
+    titleGroup: 2,
+    urlGroup: 1
   },
   {
     url: 'https://trends24.in/indonesia/',
-    selector: '<a[^>]*href="[^"]*twitter\\.com[^"]*"[^>]*class=\\s*"?[^"\\s]*"?[^>]*>\\s*([^<]{2,80}?)\\s*<\\/a>',
-    name: 'trends24',
-    minLen: 3
+    selector: '<a[^>]*href="([^"]*twitter\\.com[^"]*)"[^>]*class=\\s*"?[^"\\s]*"?[^>]*>\\s*([^<]{2,80}?)\\s*<\\/a>',
+    name: 'twitter',
+    minLen: 3,
+    titleGroup: 2,
+    urlGroup: 1
+  },
+  {
+    url: 'https://www.liputan6.com/',
+    selector: '<a[^>]*href="([^"]*liputan6\\.com/[^"]*)"[^>]*>([^<]{15,200}?)<\\/a>',
+    name: 'liputan6',
+    minLen: 15,
+    titleGroup: 2,
+    urlGroup: 1
+  },
+  {
+    url: 'https://www.inews.id/',
+    selector: '<h[^>]*>[^<]*<a[^>]*href="([^"]*)"[^>]*>([^<]{15,200}?)<\\/a>',
+    name: 'inews',
+    minLen: 15,
+    titleGroup: 2,
+    urlGroup: 1
+  },
+  {
+    url: 'https://www.suara.com/',
+    selector: '<a[^>]*href="([^"]*suara\\.com/[^"]*)"[^>]*>([^<]{15,200}?)<\\/a>',
+    name: 'suara',
+    minLen: 15,
+    titleGroup: 2,
+    urlGroup: 1
+  },
+  {
+    url: 'https://www.merdeka.com/',
+    selector: '<a[^>]*href="([^"]*merdeka\\.com/[^"]*)"[^>]*>([^<]{15,200}?)<\\/a>',
+    name: 'merdeka',
+    minLen: 15,
+    titleGroup: 2,
+    urlGroup: 1
   }
 ];
 
@@ -364,7 +411,7 @@ async function scrapeGoogleTrendsRSS() {
 
 async function scrapeNewsSource(src) {
   try {
-    const { url, selector, name: sourceName, minLen = 8 } = src;
+    const { url, selector, name: sourceName, minLen = 8, titleGroup = 1, urlGroup } = src;
     const resp = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36' }
     });
@@ -373,23 +420,34 @@ async function scrapeNewsSource(src) {
     const seen = new Set();
     const topics = [];
     for (const m of matches) {
-      let topic = (m[1] || m[0]).trim();
+      let topic = (m[titleGroup] || m[0]).trim();
       topic = topic.replace(/<[^>]+>/g, '').replace(/&\w+;/g, '').replace(/\s+/g, ' ').trim();
       if (!topic || topic.length < minLen) continue;
-      // Filter out bare location names and section labels
       const lowered = normalizeTopic(topic);
       if (LOCATIONS.has(lowered)) continue;
-      if (/^kilas\s/i.test(topic)) continue;
-      if (/^(langganan|konsultasi|berlangganan)/i.test(topic)) continue;
+      // Filter out tag/collection pages from some sources
+      if (sourceName === 'merdeka' && sourceUrl.includes('/tag/')) continue;
+      if (sourceName === 'kompas' && (sourceUrl.includes('/tren/read/') || sourceUrl.includes('.kompas.com/read/'))) {/* OK */}
+      if (sourceName === 'detik' && sourceUrl.includes('/tag/')) continue;
       const key = normalizeTopic(topic);
       if (seen.has(key)) continue;
       seen.add(key);
       const score = scoreTopic(topic, sourceName);
       if (score > 20) {
-        topics.push({ topic, source: sourceName, score,
-          relevance: score > 70 ? 'high' : score > 40 ? 'medium' : 'low',
-          angle: /ai|tech|digital|automation|bisnis|ekonomi|startup|inovasi/i.test(topic) ? 'thought leadership' :
-                 /tips|tutorial|belajar|panduan|guide|sehat|hidup|kerja/i.test(topic) ? 'tutorial' : 'general' });
+        // Extract source URL
+        let sourceUrl = urlGroup && m[urlGroup] ? m[urlGroup].trim() : '';
+        if (sourceUrl && !sourceUrl.startsWith('http')) {
+          const base = new URL(url);
+          sourceUrl = sourceUrl.startsWith('/') ? base.origin + sourceUrl : base.origin + '/' + sourceUrl;
+        }
+        // Generate context based on source type
+        let context = '';
+        if (['detik','kompas','liputan6','inews','suara','merdeka'].includes(sourceName)) {
+          context = 'Sedang ramai diperbincangkan di ' + sourceName + '. ' + topic.substring(0, 80) + '...';
+        } else if (sourceName === 'twitter') {
+          context = 'Topik trending di Twitter Indonesia.';
+        }
+        topics.push({ topic, source: sourceName, score, source_url: sourceUrl, context });
       }
     }
     return topics.slice(0, 15);
@@ -421,10 +479,10 @@ async function runTrendHunter() {
   unique.sort((a, b) => b.score - a.score);
 
   // Save to DB
-  const stmt = db.prepare("INSERT OR IGNORE INTO trends (topic,source,score,relevance,angle) VALUES (?,?,?,?,?)");
+  const stmt = db.prepare("INSERT OR IGNORE INTO trends (topic,source,score,source_url,context) VALUES (?,?,?,?,?)");
   let saved = 0;
   for (const t of unique.slice(0, 60)) {
-    try { stmt.run(t.topic, t.source, t.score, t.relevance, t.angle); saved++; }
+    try { stmt.run(t.topic, t.source, t.score, t.source_url||'', t.context||''); saved++; }
     catch(e) { /* dup */ }
   }
   console.log(`[TrendHunter] Saved ${saved} trends from ${all.length} total`);

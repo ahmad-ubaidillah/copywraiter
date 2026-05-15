@@ -61,7 +61,7 @@ function renderDashboard() {
           <td>${esc(t.topic)}</td>
           <td>${t.score}</td>
           <td>${esc(t.source)}</td>
-          <td><a href="#" onclick="return generateDraft(${t.id},'${escAttr(t.topic)}')">Generate</a></td>
+          <td>${t.source_url ? '<a href="'+escAttr(t.source_url)+'" target="_blank">Baca</a>' : ''} <a href="#" onclick="return generateDraft(${t.id},'${escAttr(t.topic)}')">Buat Draft</a></td>
         </tr>`).join('') + '</table>'
       }
     </div>
@@ -86,13 +86,13 @@ function renderTrends() {
       <button class="btn btn-primary btn-sm" onclick="return fetchTrends()">Refresh</button>
     </div>
     ${state.trends.length === 0 ? '<div class="empty"><h2>No Trends</h2><p>Click Refresh to fetch latest trends.</p></div>' :
-      '<table><tr><th>Topic</th><th>Score</th><th>Source</th><th>Angle</th><th></th></tr>' +
+      '<table><tr><th>Topic</th><th>Score</th><th>Source</th><th>Context</th><th></th></tr>' +
       state.trends.map(t => `<tr>
         <td><strong>${esc(t.topic)}</strong></td>
         <td><span class="tag">${t.score}</span></td>
         <td>${esc(t.source)}</td>
-        <td>${esc(t.angle)}</td>
-        <td><a href="#" onclick="return generateDraft(${t.id},'${escAttr(t.topic)}')">Generate</a></td>
+        <td style="font-size:.8rem;color:var(--text2);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.context||'—')}</td>
+        <td>${t.source_url ? '<a href="'+escAttr(t.source_url)+'" target="_blank">Baca</a>' : ''} <a href="#" onclick="return generateDraft(${t.id},'${escAttr(t.topic)}')">Buat Draft</a></td>
       </tr>`).join('') + '</table>'
     }
   `;
