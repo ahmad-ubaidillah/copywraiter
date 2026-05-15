@@ -6,7 +6,7 @@ AI-powered content lifecycle automation: research → strategy → generate → 
 
 ### Docker (Recommended)
 ```bash
-curl -sSL https://copywriter.ai/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/ahmad-ubaidillah/copywraiter/main/install.sh | bash
 # or locally:
 docker compose up -d --build
 ```
@@ -135,7 +135,7 @@ Analyzes: sentence length, emoji density, vocabulary richness, tone markers, par
 
 ### VPS (One-line)
 ```bash
-curl -sSL https://copywriter.ai/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/ahmad-ubaidillah/copywraiter/main/install.sh | bash
 ```
 
 ### Manual Docker

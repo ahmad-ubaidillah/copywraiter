@@ -20,7 +20,7 @@ product_requirement_document:
     deployment: "Docker & Shell Script (One-line bash installer)"
 
   deployment_and_setup:
-    one_line_installer: "curl -sSL https://copywriter.ai/install.sh | bash"
+    one_line_installer: "curl -sSL https://raw.githubusercontent.com/ahmad-ubaidillah/copywraiter/main/install.sh | bash"
     automation_logic:
       - "Detects and installs Docker/Compose if missing."
       - "Auto-maps container to Port 8080 (Configurable via .env)."
