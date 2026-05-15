@@ -402,14 +402,177 @@ Output: {"body": "...", "hashtags": "..."}`;
     res.status(500).json({ error: e.message });
   }
 });
+// ── LinkedIn Integration ──────────────────────────────────────────
+const LINKEDIN_CLIENT_ID = process.env.LINKEDIN_CLIENT_ID || '';
+const LINKEDIN_CLIENT_SECRET = process.env.LINKEDIN_CLIENT_SECRET || '';
+const LINKEDIN_REDIRECT_URI = process.env.LINKEDIN_REDIRECT_URI || 'http://localhost:5000/api/linkedin/callback';
+
+// Ensure tokens table
+db.exec(`CREATE TABLE IF NOT EXISTS linkedin_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  access_token TEXT NOT NULL,
+  refresh_token TEXT,
+  expires_at INTEGER,
+  profile_urn TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+)`);
+
+app.get('/api/linkedin/login', (req, res) => {
+  if (!LINKEDIN_CLIENT_ID) {
+    return res.json({ error: 'LINKEDIN_CLIENT_ID not configured. Set it in .env', setup_url: 'https://www.linkedin.com/developers/' });
+  }
+  const state = Math.random().toString(36).substring(2);
+  const url = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${LINKEDIN_CLIENT_ID}&redirect_uri=${encodeURIComponent(LINKEDIN_REDIRECT_URI)}&state=${state}&scope=openid%20profile%20email%20w_member_social`;
+  res.redirect(url);
+});
+
+app.get('/api/linkedin/callback', async (req, res) => {
+  const { code, error } = req.query;
+  if (error) return res.status(400).json({ error: 'LinkedIn OAuth error: ' + error });
+  if (!code) return res.status(400).json({ error: 'No authorization code' });
+
+  try {
+    // Exchange code for token
+    const tokenResp = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: LINKEDIN_REDIRECT_URI,
+        client_id: LINKEDIN_CLIENT_ID,
+        client_secret: LINKEDIN_CLIENT_SECRET
+      })
+    });
+    const tokenData = await tokenResp.json();
+    if (!tokenData.access_token) return res.status(400).json({ error: 'Failed to get token', details: tokenData });
+
+    // Get profile info
+    const profileResp = await fetch('https://api.linkedin.com/v2/userinfo', {
+      headers: { 'Authorization': 'Bearer ' + tokenData.access_token }
+    });
+    const profile = await profileResp.json();
+
+    // Store token
+    const expiresAt = tokenData.expires_in ? Date.now() + tokenData.expires_in * 1000 : 0;
+    db.prepare("DELETE FROM linkedin_tokens").run(); // only one account
+    db.prepare("INSERT INTO linkedin_tokens (access_token, refresh_token, expires_at, profile_urn) VALUES (?,?,?,?)")
+      .run(tokenData.access_token, tokenData.refresh_token || '', expiresAt, profile.sub || '');
+
+    res.json({ status: 'linked', profile: { name: profile.name, email: profile.email, sub: profile.sub } });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/linkedin/status', (req, res) => {
+  const token = db.prepare("SELECT * FROM linkedin_tokens ORDER BY id DESC LIMIT 1").get();
+  if (!token) return res.json({ linked: false });
+  const expired = token.expires_at ? Date.now() > token.expires_at : false;
+  res.json({ linked: true, expired, profile_urn: token.profile_urn, created_at: token.created_at });
+});
+
+app.post('/api/linkedin/post', async (req, res) => {
+  const { draft_id } = req.body;
+  const token = db.prepare("SELECT * FROM linkedin_tokens ORDER BY id DESC LIMIT 1").get();
+  if (!token) return res.status(400).json({ error: 'LinkedIn not connected. Go to Settings > Connect LinkedIn first.' });
+
+  const draft = db.prepare("SELECT * FROM drafts WHERE id=?").get(draft_id);
+  if (!draft) return res.status(404).json({ error: 'Draft not found' });
+
+  try {
+    const body = draft.body + '\n\n' + draft.hashtags;
+    const resp = await fetch('https://api.linkedin.com/rest/posts', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token.access_token,
+        'Content-Type': 'application/json',
+        'LinkedIn-Version': '202501',
+        'X-Restli-Protocol-Version': '2.0.0'
+      },
+      body: JSON.stringify({
+        author: 'urn:li:person:' + token.profile_urn,
+        lifecycleState: 'PUBLISHED',
+        visibility: 'PUBLIC',
+        commentary: body
+      })
+    });
+
+    if (!resp.ok) {
+      const err = await resp.text();
+      return res.status(400).json({ error: 'LinkedIn API error', details: err });
+    }
+
+    const postUrl = resp.headers.get('location') || '';
+    db.prepare("INSERT INTO posts (draft_id, platform, post_url) VALUES (?,?,?)").run(draft_id, 'linkedin', postUrl);
+    db.prepare("UPDATE drafts SET status='posted', posted_at=datetime('now') WHERE id=?").run(draft_id);
+
+    res.json({ status: 'posted', url: postUrl });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/linkedin/profile', async (req, res) => {
+  const token = db.prepare("SELECT * FROM linkedin_tokens ORDER BY id DESC LIMIT 1").get();
+  if (!token) return res.json({ linked: false });
+
+  try {
+    const resp = await fetch('https://api.linkedin.com/v2/userinfo', {
+      headers: { 'Authorization': 'Bearer ' + token.access_token }
+    });
+    const data = await resp.json();
+    res.json({ linked: true, profile: data });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 function scheduledPost() {
   console.log('[scheduler] Checking for drafts to post...');
   const now = new Date().toISOString().substring(0, 16);
   const rows = db.prepare("SELECT * FROM drafts WHERE status='scheduled' AND scheduled_at <= ?").all(now);
+  const token = db.prepare("SELECT * FROM linkedin_tokens ORDER BY id DESC LIMIT 1").get();
   for (const r of rows) {
     console.log('[scheduler] Auto-posting draft #' + r.id);
-    db.prepare("INSERT INTO posts (draft_id, platform) VALUES (?,?)").run(r.id, 'linkedin');
-    db.prepare("UPDATE drafts SET status='posted', posted_at=datetime('now') WHERE id=?").run(r.id);
+    if (token && token.access_token) {
+      // Post via LinkedIn API
+      postToLinkedIn(token, r);
+    } else {
+      // Fallback: mark as posted locally
+      db.prepare("INSERT INTO posts (draft_id, platform, post_url) VALUES (?,?,?)").run(r.id, 'linkedin', '');
+      db.prepare("UPDATE drafts SET status='posted', posted_at=datetime('now') WHERE id=?").run(r.id);
+    }
+  }
+}
+
+async function postToLinkedIn(token, draft) {
+  try {
+    const body = draft.body + '\n\n' + draft.hashtags;
+    const resp = await fetch('https://api.linkedin.com/rest/posts', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token.access_token,
+        'Content-Type': 'application/json',
+        'LinkedIn-Version': '202501',
+        'X-Restli-Protocol-Version': '2.0.0'
+      },
+      body: JSON.stringify({
+        author: 'urn:li:person:' + token.profile_urn,
+        lifecycleState: 'PUBLISHED',
+        visibility: 'PUBLIC',
+        commentary: body
+      })
+    });
+    const postUrl = resp.ok ? (resp.headers.get('location') || '') : '';
+    db.prepare("INSERT INTO posts (draft_id, platform, post_url) VALUES (?,?,?)").run(draft.id, 'linkedin', postUrl);
+    db.prepare("UPDATE drafts SET status='posted', posted_at=datetime('now') WHERE id=?").run(draft.id);
+    console.log('[scheduler] Posted draft #' + draft.id + ' url=' + postUrl);
+  } catch (e) {
+    console.error('[scheduler] Failed to post #' + draft.id + ': ' + e.message);
+    // Still mark as posted so we don't retry forever
+    db.prepare("INSERT INTO posts (draft_id, platform, post_url) VALUES (?,?,?)").run(draft.id, 'linkedin', '');
+    db.prepare("UPDATE drafts SET status='posted', posted_at=datetime('now') WHERE id=?").run(draft.id);
   }
 }
 setInterval(scheduledPost, 15 * 60 * 1000);

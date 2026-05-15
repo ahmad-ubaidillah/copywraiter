@@ -304,6 +304,14 @@ function renderSettings() {
   main.innerHTML = `
     <h2 style="margin-bottom:12px">Settings</h2>
     <div class="card">
+      <div class="card-title">LinkedIn Connection</div>
+      <div id="linkedinStatus">Checking...</div>
+      <div style="margin-top:8px">
+        <button class="btn btn-primary btn-sm" onclick="return connectLinkedIn()">Connect LinkedIn</button>
+        <button class="btn btn-sm" onclick="return checkLinkedIn()">Refresh Status</button>
+      </div>
+    </div>
+    <div class="card">
       <div class="card-title">Brand Voice</div>
       <div class="form-group"><label class="form-label">Tone</label><input type="text" id="sTone" value="${state.settings.tone||'professional-santai'}"></div>
       <div class="form-group"><label class="form-label">Posting Times (comma-separated, 24h)</label><input type="text" id="sTimes" value="${state.settings.post_times||'07:00,19:00'}"></div>
@@ -333,6 +341,28 @@ async function saveSettings() {
   await fetch('/api/settings', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
   await fetchData();
   alert('Settings saved');
+}
+
+async function checkLinkedIn() {
+  const r = await fetch('/api/linkedin/status');
+  const d = await r.json();
+  const el = $('linkedinStatus');
+  if (d.linked) {
+    el.innerHTML = `<span style="color:var(--green)">✓ Connected</span> — URN: ${d.profile_urn || 'unknown'} ${d.expired ? '<span style="color:var(--red)">(token expired - reconnect)</span>' : ''}`;
+  } else {
+    el.innerHTML = '<span style="color:var(--text3)">✗ Not connected</span>';
+  }
+}
+
+async function connectLinkedIn() {
+  const r = await fetch('/api/linkedin/login');
+  const d = await r.json();
+  if (d.error) {
+    alert('LinkedIn not configured: ' + d.error + '\n\nSetup: ' + d.setup_url);
+  } else {
+    // Should redirect
+    window.location.href = '/api/linkedin/login';
+  }
 }
 
 /* ── Actions from Trends ── */

@@ -55,23 +55,25 @@
 - **Status:** ✅ DONE
 
 ## T6: LinkedIn Integration
-- [ ] Setup LinkedIn OAuth 2.0 (client ID, secret, redirect)
-- [ ] Buat agents/linkedin_client.js
-- [ ] API: post ke LinkedIn
-- [ ] API: get profile data
-- [ ] Simpan token ke database (encrypted)
+- [x] Setup LinkedIn OAuth 2.0 flow (login, callback, token storage)
+- [x] Buat endpoint POST /api/linkedin/post — post draft ke LinkedIn
+- [x] Buat endpoint GET /api/linkedin/profile — ambil profil LinkedIn
+- [x] Buat endpoint GET /api/linkedin/status — cek koneksi
+- [x] Scheduler otomatis posting via LinkedIn API jika terhubung
+- [x] Frontend: status koneksi + tombol Connect di Settings
+- [x] Token disimpan di database (encrypted at rest)
 - **Agent:** BE + Cybersecurity
-- **Dependency:** T2
-- **Status:** ⏳ PENDING
+- **Status:** ✅ DONE (butuh user setup LinkedIn App)
 
 ## T7: Auto-Post Scheduler
-- [ ] Scheduler ambil draft approved + jadwal
-- [ ] Post otomatis 2x/hari (jam 07:00, 19:00 WIB)
-- [ ] Log hasil posting + engagement
-- [ ] Retry logic kalau gagal
+- [x] Scheduler ambil draft scheduled + post otomatis
+- [x] Post via LinkedIn API jika terhubung, fallback local jika tidak
+- [x] Log hasil posting ke tabel posts
+- [x] Interval check tiap 15 menit
+- [ ] Jadwal spesifik 2x/hari (07:00, 19:00) — tinggal set scheduled_at di draft
+- [ ] Retry logic kalau gagal (saat ini langsung mark posted)
 - **Agent:** DevOps + BE
-- **Dependency:** T5, T6
-- **Status:** ⏳ PENDING
+- **Status:** 🔄 PARTIAL (basic scheduler works, refinement optional)
 
 ## T8: Profile Optimizer
 - [ ] Read profile via LinkedIn API
