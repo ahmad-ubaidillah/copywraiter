@@ -8,7 +8,8 @@ export default function SettingsPage() {
   const [provider, setProvider] = useState("openai");
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("gpt-4o");
-  const [replizKey, setReplizKey] = useState("");
+  const [replizAccessKey, setReplizAccessKey] = useState("");
+  const [replizSecretKey, setReplizSecretKey] = useState("");
   const [tgUrl, setTgUrl] = useState("");
   const [tgChatId, setTgChatId] = useState("");
   const [discordUrl, setDiscordUrl] = useState("");
@@ -20,7 +21,7 @@ export default function SettingsPage() {
     setSaved(false);
     try {
       await api.post("/api/config/ai?user_id=default", { provider, api_key: apiKey, model });
-      await api.post("/api/config/distribution?user_id=default", { repliz_api_key: replizKey });
+      await api.post("/api/config/distribution?user_id=default", { repliz_access_key: replizAccessKey, repliz_secret_key: replizSecretKey });
       await api.post("/api/config/notifications?user_id=default", {
         telegram_url: tgUrl || undefined,
         telegram_chat_id: tgChatId || undefined,
@@ -84,9 +85,15 @@ export default function SettingsPage() {
 
           <section className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-6">
             <h2 className="mb-4 text-lg font-semibold">Distribution (Repliz)</h2>
-            <div>
-              <label className="mb-1 block text-sm font-medium">Repliz API Key</label>
-              <input type="password" value={replizKey} onChange={(e) => setReplizKey(e.target.value)} placeholder="repliz_..." className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm" />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-sm font-medium">Access Key</label>
+                <input type="password" value={replizAccessKey} onChange={(e) => setReplizAccessKey(e.target.value)} placeholder="9221167021" className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">Secret Key</label>
+                <input type="password" value={replizSecretKey} onChange={(e) => setReplizSecretKey(e.target.value)} placeholder="c1nNqv..." className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm" />
+              </div>
             </div>
           </section>
 

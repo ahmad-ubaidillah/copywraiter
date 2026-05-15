@@ -13,23 +13,42 @@ from app.services.repliz_client import ReplizClient, ReplizError
 router = APIRouter(prefix="/api/repliz", tags=["Repliz Publishing"])
 
 
+def _get_repliz_client(user_id: uuid.UUID, db: Session) -> ReplizClient:
+    setting = db.query(Setting).filter(Setting.user_id == user_id).first()
+    if not setting:
+        raise HTTPException(status_code=404, detail="Settings not found")
+    prefs = setting.ai_preferences or {}
+    access_key = prefs.get("repliz_access_key", "")
+    secret_key = prefs.get("repliz_secret_key", "")
+    base_url = prefs.get("repliz_base_url", "https://api.repliz.com")
+    if not access_key or not secret_key:
+        raise HTTPException(status_code=400, detail="Repliz credentials not configured")
+    return ReplizClient(access_key, secret_key, base_url)
+
+
 @router.post("/test")
 async def test_connection(
     user_id: uuid.UUID = Query(...),
     db: Session = Depends(get_db),
 ) -> Any:
-    setting = db.query(Setting).filter(Setting.user_id == user_id).first()
-    if not setting:
-        raise HTTPException(status_code=404, detail="Settings not found")
-    prefs = setting.ai_preferences or {}
-    api_key = prefs.get("repliz_api_key", "")
-    base_url = prefs.get("repliz_base_url", "https://api.repliz.io")
-    if not api_key:
-        raise HTTPException(status_code=400, detail="Repliz API key not configured")
-    client = ReplizClient(api_key, base_url)
+    client = _get_repliz_client(user_id, db)
     try:
         result = client.test_connection()
         return {"status": "ok", "message": "Repliz API connection successful", "data": result}
+    except ReplizError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/accounts")
+async def list_accounts(
+    user_id: uuid.UUID = Query(...),
+    platform: str | None = Query(None),
+    db: Session = Depends(get_db),
+) -> Any:
+    client = _get_repliz_client(user_id, db)
+    try:
+        result = client.get_accounts(platform=platform)
+        return result
     except ReplizError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -38,6 +57,7 @@ async def test_connection(
 async def publish_post(
     post_id: uuid.UUID,
     user_id: uuid.UUID = Query(...),
+    account_id: str = Query(..., description="Repliz account _id from /accounts"),
     db: Session = Depends(get_db),
 ) -> Any:
     post = db.query(Post).filter(Post.id == post_id, Post.user_id == user_id).first()
@@ -46,22 +66,14 @@ async def publish_post(
     if not post.content:
         raise HTTPException(status_code=400, detail="Post has no content")
 
-    setting = db.query(Setting).filter(Setting.user_id == user_id).first()
-    if not setting:
-        raise HTTPException(status_code=404, detail="Settings not found")
-    prefs = setting.ai_preferences or {}
-    api_key = prefs.get("repliz_api_key", "")
-    base_url = prefs.get("repliz_base_url", "https://api.repliz.io")
-    if not api_key:
-        raise HTTPException(status_code=400, detail="Repliz API key not configured")
-
-    client = ReplizClient(api_key, base_url)
+    client = _get_repliz_client(user_id, db)
     scheduled_at = post.scheduled_at.isoformat() if post.scheduled_at else None
     try:
         result = client.create_post(
             content=post.content,
+            account_id=account_id,
+            post_type="text",
             scheduled_at=scheduled_at,
-            platform=post.platform or "linkedin",
         )
         post.status = "scheduled" if scheduled_at else "published"
         post.published_url = result.get("url", "")

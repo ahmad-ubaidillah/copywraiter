@@ -24,7 +24,8 @@ export default function SetupPage() {
     apiKey: "",
     model: "gpt-4o",
     baseUrl: "",
-    replizApiKey: "",
+    replizAccessKey: "",
+    replizSecretKey: "",
     replizBaseUrl: "",
     language: "en",
     styleText: "",
@@ -85,7 +86,8 @@ export default function SetupPage() {
     setLoading(true);
     try {
       await api.post("/api/config/distribution?user_id=default", {
-        repliz_api_key: form.replizApiKey,
+        repliz_access_key: form.replizAccessKey,
+        repliz_secret_key: form.replizSecretKey,
         repliz_base_url: form.replizBaseUrl,
       });
       setStep(2);
@@ -217,25 +219,37 @@ export default function SetupPage() {
           {step === 1 && (
             <div className="space-y-4">
               <h2 className="text-lg font-semibold">Distribution (Repliz API)</h2>
-              <div>
-                <label className="mb-1 block text-sm font-medium">Repliz API Key</label>
-                <input
-                  type="password"
-                  value={form.replizApiKey}
-                  onChange={(e) => update("replizApiKey", e.target.value)}
-                  placeholder="repliz_..."
-                  className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium">Repliz Base URL (optional)</label>
-                <input
-                  type="text"
-                  value={form.replizBaseUrl}
-                  onChange={(e) => update("replizBaseUrl", e.target.value)}
-                  placeholder="https://api.repliz.io"
-                  className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                />
+              <div className="space-y-3">
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Access Key</label>
+                  <input
+                    type="password"
+                    value={form.replizAccessKey}
+                    onChange={(e) => update("replizAccessKey", e.target.value)}
+                    placeholder="9221167021"
+                    className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Secret Key</label>
+                  <input
+                    type="password"
+                    value={form.replizSecretKey}
+                    onChange={(e) => update("replizSecretKey", e.target.value)}
+                    placeholder="c1nNqv..."
+                    className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Repliz Base URL (optional)</label>
+                  <input
+                    type="text"
+                    value={form.replizBaseUrl}
+                    onChange={(e) => update("replizBaseUrl", e.target.value)}
+                    placeholder="https://api.repliz.com"
+                    className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                  />
+                </div>
               </div>
               <button
                 onClick={saveDistribution}

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Setting
+from app.services.repliz_client import ReplizClient, ReplizError
 from config import settings
 from services.ai_client import AIClient, AIClientError
 
@@ -45,7 +46,8 @@ class AIConfigRequest(BaseModel):
 
 
 class DistributionConfigRequest(BaseModel):
-    repliz_api_key: str = ""
+    repliz_access_key: str = ""
+    repliz_secret_key: str = ""
     repliz_base_url: str = ""
 
 
@@ -169,7 +171,7 @@ async def get_distribution_config(
     if not setting:
         return {"repliz_configured": False}
     prefs = setting.ai_preferences or {}
-    has_key = bool(prefs.get("repliz_api_key", ""))
+    has_key = bool(prefs.get("repliz_access_key", ""))
     return {
         "repliz_configured": has_key,
         "repliz_base_url": prefs.get("repliz_base_url", ""),
@@ -204,13 +206,17 @@ async def test_distribution(
     if not setting:
         raise HTTPException(status_code=400, detail="No distribution config found")
     prefs = setting.ai_preferences or {}
-    api_key = prefs.get("repliz_api_key", "")
-    if not api_key:
-        raise HTTPException(status_code=400, detail="Repliz API key not configured")
-    return {
-        "status": "ok",
-        "message": "Repliz API key is configured. Test post would be sent here.",
-    }
+    api_key = prefs.get("repliz_access_key", "")
+    secret_key = prefs.get("repliz_secret_key", "")
+    base_url = prefs.get("repliz_base_url", "https://api.repliz.com")
+    if not api_key or not secret_key:
+        raise HTTPException(status_code=400, detail="Repliz credentials not configured")
+    client = ReplizClient(api_key, secret_key, base_url)
+    try:
+        result = client.test_connection()
+        return {"status": "ok", "message": "Repliz connection OK", "data": result}
+    except ReplizError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/notifications")
