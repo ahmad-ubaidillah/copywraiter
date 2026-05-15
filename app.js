@@ -78,6 +78,13 @@ app.get('/api/status', (req, res) => {
 app.post('/api/trends/refresh', async (req, res) => {
   try {
     const results = await runTrendHunter();
+    // Hapus trends lama yang bukan dari refresh ini (tapi amankan referensi draft)
+    const keepTopics = results.map(t => t.topic);
+    if (keepTopics.length > 0) {
+      const placeholders = keepTopics.map(() => '?').join(',');
+      // Hanya hapus yang tidak direferensi oleh draft
+      db.prepare(`DELETE FROM trends WHERE topic NOT IN (${placeholders}) AND id NOT IN (SELECT DISTINCT topic_id FROM drafts WHERE topic_id IS NOT NULL)`).run(...keepTopics);
+    }
     res.json({ status: 'ok', count: results.length, trends: results });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -185,19 +192,55 @@ app.use((req, res, next) => {
 
 // ── Trend Hunter ──────────────────────────────────────────────────
 const BLACKLIST = ['k-pop','fanwar','fanbase','kazz','yoshi','dunk','joong',
-  'enhypen','bts','sk8er','yoxi','donutsmp'];
+  'enhypen','bts','sk8er','yoxi','donutsmp','donutsmp','born2shine','perthsanta'];
+
+// Trivial words that are not meaningful content
+const TRIVIAL = new Set([
+  'libur','pagii','pagi','siang','sore','malam',
+  'senin','selasa','rabu','kamis','sabtu','minggu',
+  'januari','februari','maret','april','mei','juni','juli','agustus','september','oktober','november','desember',
+  'hallo','hello','hai','hi','test','testing','coba','ah','oh','wah',
+  'bismillah','alhamdulillah','subhanallah','astagfirullah'
+]);
+
+function isTrivial(topic) {
+  const t = topic.toLowerCase().trim();
+  if (t.length < 4 && !/[A-Za-z]{3,}/.test(t)) return true;
+  if (TRIVIAL.has(t) || TRIVIAL.has(t.replace(/[^a-z]/g,''))) return true;
+  // Single very short word (1-3 chars) without context
+  if (!/\s/.test(t) && t.length <= 3 && !/tech|ai|pro|hub|id/i.test(t)) return true;
+  return false;
+}
+
+// Topics that are clearly not about Indonesia
+const INTERNATIONAL_KEYWORDS = [
+  'premier league','la liga','nba','nfl','mlb','uefa','champions league',
+  'world cup','olympics','grand slam','super bowl',
+  'trump','biden','putin','xi jinping','ukraine','russia','israel','palestine',
+  'ollie watkins','mitch marner','tuch','chargers','raiders','titans','rams','cubs','rangers',
+  'nvidia','apple','microsoft','google','meta','amazon','tsla','bitcoin','ethereum',
+  'trade $','stock market','wall street','dow jones','s&p','nasdaq'
+];
 
 function scoreTopic(topic, source) {
+  if (isTrivial(topic)) return 0;
+  // Filter international topics
+  if (INTERNATIONAL_KEYWORDS.some(k => topic.toLowerCase().includes(k))) return 0;
+
   let score = source === 'trends24' ? 50 : 60;
-  // Boost for tech/business topics
   if (/\b(ai|automation|tech|digital|startup|bisnis|ekonomi|work|karir|linkedin|personal.?branding|n8n|coding|programmer|software)\b/i.test(topic)) score += 30;
   if (/tips|tutorial|cara|guide|belajar|panduan/i.test(topic)) score += 20;
-  if (/politik|presiden|menteri|pemerintah|parpol|nadiem|gibran|prabowo|menteri|kpk|korupsi/i.test(topic)) score -= 50;
   if (/sepak.?bola|liga|club|fc|vs|madrid|barcelona|juventus|premier/i.test(topic)) score -= 30;
-  if (/kenaikan.*kristus|natal|idul.?fitri|imlek|nyepi/i.test(topic)) score -= 30;
-  if (/[\u3040-\u9fff\uac00-\ud7af]/.test(topic)) score -= 40; // CJK/Korean chars
-  if (BLACKLIST.some(b => topic.toLowerCase().includes(b))) score = 0;
+  if (/[\u3040-\u9fff\uac00-\ud7af]/.test(topic)) score -= 40;
+  if (BLACKLIST.some(b => topic.toLowerCase().includes(b))) return 0;
   return Math.max(0, Math.min(100, score));
+}
+
+function normalizeTopic(topic) {
+  return topic.toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 async function scrapeTrends24() {
@@ -205,20 +248,21 @@ async function scrapeTrends24() {
     headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36' }
   });
   const html = await resp.text();
-  // Extract trending topics from trends24 timeline
   const matches = [...html.matchAll(/<a[^>]*href="[^"]*"[^>]*class=\s*"?[^"\s]*"?[^>]*>\s*([^<{][^<]{2,80}?)\s*<\/a>/g)];
   const seen = new Set();
   const topics = [];
   for (const m of matches) {
-    const topic = m[1].trim().replace(/&\w+;/g, '').replace(/\s+/g, ' ').replace(/^\d+[. ]*/, '');
-    if (!topic || topic.length < 4 || seen.has(topic)) continue;
-    seen.add(topic);
+    let topic = m[1].trim().replace(/&\w+;/g, '').replace(/\s+/g, ' ').replace(/^\d+[. ]*/, '');
+    if (!topic || topic.length < 3) continue;
+    const key = normalizeTopic(topic);
+    if (seen.has(key)) continue;
+    seen.add(key);
     const score = scoreTopic(topic, 'trends24');
     if (score > 20) {
       topics.push({ topic, source: 'trends24', score,
         relevance: score > 70 ? 'high' : score > 40 ? 'medium' : 'low',
-        angle: /ai|tech|digital|automation/i.test(topic) ? 'thought leadership' :
-               /tips|tutorial|belajar/i.test(topic) ? 'tutorial' : 'general' });
+        angle: /ai|tech|digital|automation|bisnis|ekonomi/i.test(topic) ? 'thought leadership' :
+               /tips|tutorial|belajar|panduan|guide/i.test(topic) ? 'tutorial' : 'general' });
     }
   }
   return topics.slice(0, 25);
@@ -248,18 +292,126 @@ async function scrapeGoogleTrends() {
   } catch { return []; }
 }
 
-async function runTrendHunter() {
-  console.log('[TrendHunter] Scraping trends...');
-  const [t24, gt] = await Promise.allSettled([scrapeTrends24(), scrapeGoogleTrends()]);
-  const all = [];
-  if (t24.status === 'fulfilled') all.push(...t24.value);
-  if (gt.status === 'fulfilled') all.push(...gt.value);
+// Location names that need context — filter out if standalone
+const LOCATIONS = new Set([
+  'sumatera','sumatra','jawa','kalimantan','sulawesi','papua','maluku','bali','nusa tenggara',
+  'aceh','medan','padang','palembang','lampung','pekanbaru','jambi','bengkulu','tanjungpinang','pangkalpinang',
+  'jakarta','bandung','semarang','surabaya','yogyakarta','solo','malang','surakarta','bekasi','tangerang','depok','bogor',
+  'banjarmasin','banjarbaru','palangkaraya','pontianak','samarinda','balikpapan',
+  'makassar','manado','palu','kendari','gorontalo','mamuju','ambon','ternate','soa siu','manokwari','jayapura',
+  'denpasar','mataram','kupang',
+  'sumatera utara','sumatera barat','sumatera selatan','riau','kepulauan riau','jambi','bengkulu','lampung','bangka belitung',
+  'jawa barat','jawa tengah','jawa timur','banten',
+  'kalimantan barat','kalimantan tengah','kalimantan timur','kalimantan utara','kalimantan selatan',
+  'sulawesi utara','sulawesi tengah','sulawesi selatan','sulawesi barat','sulawesi tenggara','gorontalo',
+  'maluku','maluku utara','papua barat','papua','papua tengah','papua pegunungan','papua selatan',
+  'bali','nusa tenggara barat','nusa tenggara timur'
+]);
 
-  // Dedup by normalized topic
+const NEWS_SOURCES = [
+  {
+    url: 'https://www.kompas.com/tren',
+    selector: '<h[23][^>]*class="[^"]*tren[^"]*"[^>]*>([^<]{15,200}?)<\\/h[23]>',
+    name: 'kompas',
+    minLen: 15
+  },
+  {
+    url: 'https://www.detik.com/terpopuler',
+    selector: '<article[^>]*>[\\s\\S]*?<a[^>]*href="[^"]*detik\\.com/[^"]*"[^>]*>([^<]{20,200}?)<\\/a>',
+    name: 'detik',
+    minLen: 20
+  },
+  {
+    url: 'https://getdaytrends.com/indonesia/',
+    selector: '<a class="string"[^>]*>([^<]+)<\\/a>',
+    name: 'getdaytrends',
+    minLen: 3
+  },
+  {
+    url: 'https://trends24.in/indonesia/',
+    selector: '<a[^>]*href="[^"]*twitter\\.com[^"]*"[^>]*class=\\s*"?[^"\\s]*"?[^>]*>\\s*([^<]{2,80}?)\\s*<\\/a>',
+    name: 'trends24',
+    minLen: 3
+  }
+];
+
+async function scrapeGoogleTrendsRSS() {
+  try {
+    const resp = await fetch('https://trends.google.com/trends/trendingsearches/daily/rss?geo=ID', {
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    const xml = await resp.text();
+    const matches = [...xml.matchAll(/<title><!\[CDATA\[([^\]]+)\]\]><\/title>/g)];
+    const seen = new Set();
+    const topics = [];
+    for (const m of matches.slice(1)) { // skip first which is feed title
+      let topic = m[1].trim();
+      if (!topic || topic.length < 5) continue;
+      const key = normalizeTopic(topic);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const score = scoreTopic(topic, 'google_trends');
+      if (score > 20) {
+        topics.push({ topic, source: 'google_trends', score,
+          relevance: score > 70 ? 'high' : score > 40 ? 'medium' : 'low',
+          angle: /ai|tech|digital|automation|bisnis|ekonomi|startup/i.test(topic) ? 'thought leadership' :
+                 /tips|tutorial|belajar|panduan|guide|sehat|hidup|kerja/i.test(topic) ? 'tutorial' : 'general' });
+      }
+    }
+    return topics.slice(0, 15);
+  } catch { return []; }
+}
+
+async function scrapeNewsSource(src) {
+  try {
+    const { url, selector, name: sourceName, minLen = 8 } = src;
+    const resp = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36' }
+    });
+    const html = await resp.text();
+    const matches = [...html.matchAll(new RegExp(selector, 'gi'))];
+    const seen = new Set();
+    const topics = [];
+    for (const m of matches) {
+      let topic = (m[1] || m[0]).trim();
+      topic = topic.replace(/<[^>]+>/g, '').replace(/&\w+;/g, '').replace(/\s+/g, ' ').trim();
+      if (!topic || topic.length < minLen) continue;
+      // Filter out bare location names and section labels
+      const lowered = normalizeTopic(topic);
+      if (LOCATIONS.has(lowered)) continue;
+      if (/^kilas\s/i.test(topic)) continue;
+      if (/^(langganan|konsultasi|berlangganan)/i.test(topic)) continue;
+      const key = normalizeTopic(topic);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const score = scoreTopic(topic, sourceName);
+      if (score > 20) {
+        topics.push({ topic, source: sourceName, score,
+          relevance: score > 70 ? 'high' : score > 40 ? 'medium' : 'low',
+          angle: /ai|tech|digital|automation|bisnis|ekonomi|startup|inovasi/i.test(topic) ? 'thought leadership' :
+                 /tips|tutorial|belajar|panduan|guide|sehat|hidup|kerja/i.test(topic) ? 'tutorial' : 'general' });
+      }
+    }
+    return topics.slice(0, 15);
+  } catch { return []; }
+}
+
+async function runTrendHunter() {
+  console.log('[TrendHunter] Scraping from ' + NEWS_SOURCES.length + ' sources...');
+  const promises = NEWS_SOURCES.map(s => scrapeNewsSource(s));
+
+  const results = await Promise.allSettled(promises);
+
+  const all = [];
+  for (const r of results) {
+    if (r.status === 'fulfilled') all.push(...r.value);
+  }
+
+  // Dedup by normalized topic across all sources
   const seen = new Set();
   const unique = [];
   for (const t of all) {
-    const key = t.topic.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const key = normalizeTopic(t.topic);
     if (seen.has(key)) continue;
     seen.add(key);
     unique.push(t);
@@ -268,17 +420,15 @@ async function runTrendHunter() {
   // Sort by score descending
   unique.sort((a, b) => b.score - a.score);
 
-  // Save top 30 to DB
+  // Save to DB
   const stmt = db.prepare("INSERT OR IGNORE INTO trends (topic,source,score,relevance,angle) VALUES (?,?,?,?,?)");
   let saved = 0;
-  for (const t of unique.slice(0, 30)) {
-    try {
-      stmt.run(t.topic, t.source, t.score, t.relevance, t.angle);
-      saved++;
-    } catch(e) { /* dup */ }
+  for (const t of unique.slice(0, 60)) {
+    try { stmt.run(t.topic, t.source, t.score, t.relevance, t.angle); saved++; }
+    catch(e) { /* dup */ }
   }
-  console.log(`[TrendHunter] Saved ${saved} trends`);
-  return unique.slice(0, 10);
+  console.log(`[TrendHunter] Saved ${saved} trends from ${all.length} total`);
+  return unique.slice(0, 40);
 }
 
 // ── Copywriter ────────────────────────────────────────────────────
