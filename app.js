@@ -30,6 +30,7 @@ db.exec(`
 // Migrate old DB — add columns if missing
 try { db.exec("ALTER TABLE trends ADD COLUMN source_url TEXT DEFAULT ''"); } catch(e) {}
 try { db.exec("ALTER TABLE trends ADD COLUMN context TEXT DEFAULT ''"); } catch(e) {}
+try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_trends_topic ON trends(topic)"); } catch(e) {}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS drafts (
@@ -93,6 +94,8 @@ app.post('/api/trends/refresh', async (req, res) => {
       db.prepare(`DELETE FROM trends WHERE topic NOT IN (${placeholders}) AND id NOT IN (SELECT DISTINCT topic_id FROM drafts WHERE topic_id IS NOT NULL)`).run(...keepTopics);
     }
     res.json({ status: 'ok', count: results.length, trends: results });
+    // Dedup: keep only the latest entry per topic
+    db.exec("DELETE FROM trends WHERE id NOT IN (SELECT MIN(id) FROM trends GROUP BY topic)");
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -199,7 +202,20 @@ app.use((req, res, next) => {
 
 // ── Trend Hunter ──────────────────────────────────────────────────
 const BLACKLIST = ['k-pop','fanwar','fanbase','kazz','yoshi','dunk','joong',
-  'enhypen','bts','sk8er','yoxi','donutsmp','donutsmp','born2shine','perthsanta'];
+  'enhypen','bts','sk8er','yoxi','donutsmp','donutsmp','born2shine','perthsanta',
+  'tonton selengkapnya','baca juga','artikel terkait','selengkapnya','lihat lainnya'];
+
+// Only keep topics that are meaningful for copywriting:
+// - Minimum 5 words OR contain a verb/action word
+// - Not just names/places without context
+function isMeaninglessTopic(topic) {
+  const words = topic.trim().split(/\s+/);
+  if (words.length < 4) return true; // too short, no context
+  // Check if it contains typical Indonesian verbs indicating real news
+  const hasAction = /(resmi|terjadi|ungkap|bicara|ungkap|klaim|ancam|dukung|tolak|minta|beri|batal|larang|wajib|naik|turun|buka|tutup|henti|lapor|tuntut|vonis|hukum|denda|tangkap|serang|bom|tabrak|bakar|curi|rampas|gelap|selamat|tewas|tewas|korban|rugi|bantu|santuni|salur|bangun|kembang|luncur|rilis|terbit|siar|tayang|gelar|ikuti|hadir|kunjung|tinjau|sidak|razia|sita|blokir|beku|bubar|larut|demo|mogok|boikot)\b/i.test(topic);
+  if (!hasAction && words.length < 6) return true; // no action verb AND too short
+  return false;
+}
 
 // Trivial words that are not meaningful content
 const TRIVIAL = new Set([
@@ -233,6 +249,7 @@ const INTERNATIONAL_KEYWORDS = [
 
 function scoreTopic(topic, source) {
   if (isTrivial(topic)) return 0;
+  if (isMeaninglessTopic(topic)) return 0;
   // Filter international topics
   if (INTERNATIONAL_KEYWORDS.some(k => topic.toLowerCase().includes(k))) return 0;
 
