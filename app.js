@@ -609,6 +609,76 @@ async function runTrendHunter() {
   return unique.slice(0, 40);
 }
 
+// ── Content Identity Manager ───────────────────────────────────────
+// Multi-Topic Selector: available niches
+const NICHE_CATEGORIES = [
+  { id: 'technology', label: 'Technology & AI', keywords: ['ai','artificial intelligence','tech','digital','coding','programmer','software','saas','startup'] },
+  { id: 'economy', label: 'Economy & Bisnis', keywords: ['ekonomi','bisnis','pajak','harga','inflasi','saham','investasi','usaha'] },
+  { id: 'lifestyle', label: 'Lifestyle & Karir', keywords: ['karir','kerja','pekerjaan','gaji','lifestyle','work','produktivitas','linkedin','personal branding'] },
+  { id: 'entertainment', label: 'Entertainment & Viral', keywords: ['viral','trending','medsos','sosmed','tiktok','youtube','konten','seleb'] },
+  { id: 'education', label: 'Education & Tips', keywords: ['tips','tutorial','cara','belajar','pendidikan','sekolah','kuliah','skill','panduan'] },
+  { id: 'news', label: 'Berita Umum', keywords: [] }
+];
+
+app.get('/api/niches', (req, res) => {
+  res.json({ niches: NICHE_CATEGORIES });
+});
+
+app.post('/api/niches/filter', (req, res) => {
+  const nicheId = req.body.niche_id;
+  const niche = NICHE_CATEGORIES.find(n => n.id === nicheId);
+  if (!niche) return res.json({ trends: [] });
+
+  let rows;
+  if (niche.keywords.length > 0) {
+    // Filter trends by keyword matching
+    const conditions = niche.keywords.map(() => "LOWER(topic) LIKE ?");
+    const params = niche.keywords.map(k => '%' + k + '%');
+    rows = db.prepare(`SELECT * FROM trends WHERE ${conditions.join(' OR ')} ORDER BY score DESC LIMIT 20`).all(...params);
+  } else {
+    rows = db.prepare("SELECT * FROM trends ORDER BY score DESC LIMIT 20").all();
+  }
+
+  // If empty, return recent trends anyway
+  if (rows.length === 0) {
+    rows = db.prepare("SELECT * FROM trends ORDER BY score DESC LIMIT 10").all();
+  }
+  res.json({ trends: rows, niche: niche.label });
+});
+
+app.post('/api/niches/custom-topic', (req, res) => {
+  const { topic } = req.body;
+  if (!topic || topic.trim().length < 3) return res.status(400).json({ error: 'Topic minimal 3 karakter' });
+  // Save as trend
+  const stmt = db.prepare("INSERT OR IGNORE INTO trends (topic, source, score) VALUES (?,?,?)");
+  const info = stmt.run(topic.trim(), 'custom', 60);
+  res.json({ id: info.lastInsertRowid, topic: topic.trim(), source: 'custom', score: 60 });
+});
+
+// ── Instruction Vault ──
+// Store writing skills, rules, and general persona separately from writing style
+db.exec(`CREATE TABLE IF NOT EXISTS instruction_vault (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  section TEXT NOT NULL CHECK(section IN ('skills','rules','persona')),
+  content TEXT NOT NULL DEFAULT '',
+  updated_at TEXT DEFAULT (datetime('now'))
+)`);
+db.exec("INSERT OR IGNORE INTO instruction_vault (section, content) VALUES ('skills',''),('rules',''),('persona','')");
+
+app.get('/api/instruction-vault', (req, res) => {
+  const rows = db.prepare("SELECT section, content FROM instruction_vault").all();
+  const vault = { skills: '', rules: '', persona: '' };
+  rows.forEach(r => vault[r.section] = r.content);
+  res.json(vault);
+});
+
+app.put('/api/instruction-vault', (req, res) => {
+  const { section, content } = req.body;
+  if (!['skills','rules','persona'].includes(section)) return res.status(400).json({ error: 'Section must be skills/rules/persona' });
+  db.prepare("UPDATE instruction_vault SET content=?, updated_at=datetime('now') WHERE section=?").run(content || '', section);
+  res.json({ status: 'saved', section });
+});
+
 // ── Writing Style Config ──────────────────────────────────────────
 const DEFAULT_WRITING_STYLE = {
   "identity": {

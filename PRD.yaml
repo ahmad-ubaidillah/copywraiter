@@ -1,0 +1,80 @@
+product_requirement_document:
+  version: "1.5 (Final)"
+  title: "CopywrAIter - Autonomous Research & Copywriting Agent"
+  author: "Ahmad Ubaidillah"
+  status: "Ready for Development"
+
+  executive_summary:
+    description: >
+      A sophisticated, autonomous AI agent platform that automates the full content lifecycle.
+      From deep topic research and style-consistent copywriting using expert frameworks
+      to visual scheduling and automated distribution via Repliz API.
+
+  technical_stack:
+    backend: "Python (FastAPI)"
+    agent_framework: "LangGraph / CrewAI (Handles the iterative Research -> Write loop)"
+    research_engine: "Crawl4AI / Tavily (For real-time web intelligence)"
+    frontend: "React / Next.js with Tailwind CSS & shadcn/ui"
+    database: "SQLite (Local-first for easy VPS portability)"
+    scheduler: "APScheduler / Celery Beat (For precise posting time execution)"
+    deployment: "Docker & Shell Script (One-line bash installer)"
+
+  deployment_and_setup:
+    one_line_installer: "curl -sSL https://copywriter.ai/install.sh | bash"
+    automation_logic:
+      - "Detects and installs Docker/Compose if missing."
+      - "Auto-maps container to Port 8080 (Configurable via .env)."
+      - "Detects public VPS IP and provides a direct setup link on completion."
+    setup_wizard_ui:
+      ai_config:
+        - "Input: Provider Base URL & API Key."
+        - "Feature: 'Fetch Models' dynamic dropdown."
+        - "Feature: 'Connection Test' button."
+      distribution_config:
+        - "Input: Repliz API Key."
+        - "Feature: 'Test Post' button (Verifies API permissions)."
+
+  ai_intelligence_layer:
+    native_knowledge:
+      copywriting_frameworks: ["AIDA", "PAS", "BAB", "FAB", "The 4 C's"]
+      hook_frameworks: ["Negative", "Statistical", "Curiosity", "Authority", "Question-Based"]
+    localization:
+      language_selection: ["English", "Indonesian (Formal)", "Indonesian (Casual/Gaul)", "Custom"]
+    style_mimicry_engine:
+      feature: "Style Reference Input"
+      description: "Field to paste existing content/posts. AI analyzes cadence, emoji use, and vocabulary to mimic the user's specific brand voice."
+
+  functional_requirements:
+    content_identity_manager:
+      - "Multi-Topic Selector: Dropdown for trending niches + 'Other' for custom topics."
+      - "Instruction Vault: Markdown editor for specific 'Skills', 'Rules', and 'General Persona'."
+      - "Template Porter: Downloadable .md template for users to refine via Gemini/ChatGPT."
+
+    autonomous_workflow:
+      stage_1_research: "Agent performs real-time web scraping based on selected topics/niches."
+      stage_2_strategy: "AI selects the best Framework (e.g., PAS) and Hook based on current research data."
+      stage_3_generation: "Produces content variations matching the 'Style Reference' and 'Instruction Vault' rules."
+      stage_4_calendar:
+        - "Visual Content Calendar: Drag-and-drop posts between dates/times."
+        - "A/B Drafts: Generates 2 variations per slot for user selection."
+      stage_5_posting: "Fully automated posting to Repliz at the scheduled timestamp."
+
+    monitoring_and_alerts:
+      - "Live 'Agent Thinking' Log window in the dashboard."
+      - "Telegram/Discord Webhook notifications for successful posts or API errors."
+
+  data_schema:
+    config_store: "Stores encrypted API keys, language preferences, and Instruction Vault markdown."
+    content_store:
+      fields: ["id", "topic", "hook_type", "framework", "content_body", "style_id", "status", "scheduled_at", "repliz_id"]
+    reference_store: "Stores 'Style Reference' texts for few-shot prompting."
+
+  success_metrics:
+    - "Deployment to VPS takes < 180 seconds."
+    - "AI output requires < 5% manual correction due to Style Mimicry and Native Frameworks."
+    - "Consistent posting frequency achieved without manual daily input."
+
+  future_roadmap:
+    - "Multi-platform distribution (LinkedIn, X, Instagram)."
+    - "Visual Asset Generation (Flux.1 / DALL-E 3 integration)."
+    - "RAG Knowledge Base (Upload brand PDFs for internal context)."
