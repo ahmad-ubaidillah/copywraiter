@@ -163,7 +163,6 @@ function renderDrafts() {
           </label>
           <button class="btn btn-sm btn-danger" onclick="deleteSelectedDrafts()" ${selectedDrafts.size === 0 ? 'disabled style="opacity:0.4"' : ''}>Hapus (${selectedDrafts.size})</button>
         ` : ''}
-        <button class="btn btn-primary btn-sm" onclick="return showGenerateForm()">+ New Draft</button>
       </div>
     </div>
     ${['draft','approved','scheduled','posted','rejected'].map(s => `
@@ -189,8 +188,8 @@ function renderDrafts() {
 }
 
 function actionButtons(d) {
-  if (d.status === 'draft') return `<button class="btn btn-sm btn-success" onclick="return approveDraft(${d.id})">Approve</button> <button class="btn btn-sm btn-danger" onclick="return rejectDraft(${d.id})">Reject</button>`;
-  if (d.status === 'approved') return `<button class="btn btn-sm" onclick="return scheduleDraft(${d.id})">Schedule</button> <button class="btn btn-sm btn-primary" onclick="return postNow(${d.id})">Post Now</button>`;
+  if (d.status === 'draft') return `<button class="btn btn-sm btn-success" onclick="return approveDraft(${d.id})">Approve</button> <button class="btn btn-sm" onclick="return rejectDraft(${d.id})">Reject</button>`;
+  if (d.status === 'approved') return `<button class="btn btn-sm" onclick="return scheduleDraft(${d.id})">Schedule</button>`;
   if (d.status === 'rejected') return `<span style="color:var(--red);font-size:.75rem">Rejected</span>`;
   return `<span style="color:var(--text3);font-size:.75rem">${d.status}</span>`;
 }
@@ -202,68 +201,6 @@ async function approveDraft(id) {
 async function rejectDraft(id) {
   await fetch('/api/draft/'+id+'/reject', {method:'POST'});
   await fetchData(); renderDrafts();
-}
-async function postNow(id) {
-  if (!confirm('Post this draft now?')) return;
-  await fetch('/api/post/now', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({draft_id:id})});
-  await fetchData(); renderDrafts();
-}
-
-function showGenerateForm() {
-  main.innerHTML = `
-    <div class="card">
-      <div class="card-title">Generate New Draft</div>
-      <div class="form-group">
-        <label class="form-label">Topic / Trend</label>
-        <input type="text" id="draftTopic" placeholder="e.g. AI Automation 2026" value="${state.trends[0]?.topic||''}">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Tone</label>
-        <select id="draftTone"><option value="professional-santai">Professional Santai</option><option value="thought-leadership">Thought Leadership</option><option value="storytelling">Storytelling</option></select>
-      </div>
-      <div style="display:flex;gap:8px;margin-bottom:12px">
-        <button class="btn btn-primary" onclick="return generateAIDraft()">✨ Generate with AI</button>
-        <span style="color:var(--text3);font-size:.8rem;align-self:center">or write manually below</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Manual Draft Body</label>
-        <textarea id="draftBody" placeholder="Write draft content manually..."></textarea>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Hashtags</label>
-        <input type="text" id="draftHashtags" placeholder="#AI #Automation">
-      </div>
-      <button class="btn" onclick="return saveDraft()">Save Draft</button>
-    </div>
-  `;
-}
-
-async function generateAIDraft() {
-  const topic = $('draftTopic').value;
-  const tone = $('draftTone').value;
-  main.innerHTML = '<div class="loader"><div class="spinner"></div><p>Membaca berita & nulis draft...</p></div>';
-  try {
-    const r = await fetch('/api/draft/generate-ai', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({topic, tone})
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'Gagal');
-    await fetchData();
-    previewDraft(d.id);
-  } catch(e) {
-    main.innerHTML = `<div class="empty"><h2>Error</h2><p>${e.message}</p></div>`;
-  }
-}
-
-async function saveDraft() {
-  const body = $('draftBody').value;
-  if (!body) { alert('Write something'); return; }
-  await fetch('/api/draft/generate', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({body, hashtags:$('draftHashtags').value, topic_id:null})
-  });
-  await fetchData(); route('drafts');
 }
 
 /* ── History ── */

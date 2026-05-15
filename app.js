@@ -124,12 +124,7 @@ app.get('/api/drafts', (req, res) => {
   res.json({ drafts: rows });
 });
 
-app.post('/api/draft/generate', (req, res) => {
-  const { body, hashtags, topic_id } = req.body;
-  const r = db.prepare("INSERT INTO drafts (topic_id, body, hashtags, status) VALUES (?,?,?,?)")
-    .run(topic_id||null, body, hashtags||'', 'draft');
-  res.status(201).json({ id: r.lastInsertRowid, status: 'draft' });
-});
+// (removed — old /api/draft/generate, superseded by /api/draft/generate-ai)
 
 app.post('/api/draft/:id/approve', (req, res) => {
   db.prepare("UPDATE drafts SET status='approved' WHERE id=?").run(req.params.id);
@@ -165,14 +160,7 @@ app.get('/api/history', (req, res) => {
   res.json({ posts: rows });
 });
 
-app.post('/api/post/now', (req, res) => {
-  const { draft_id } = req.body;
-  const draft = db.prepare("SELECT * FROM drafts WHERE id=?").get(draft_id);
-  if (!draft) return res.status(404).json({ error: 'Not found' });
-  db.prepare("INSERT INTO posts (draft_id, platform) VALUES (?,?)").run(draft_id, 'linkedin');
-  db.prepare("UPDATE drafts SET status='posted', posted_at=datetime('now') WHERE id=?").run(draft_id);
-  res.json({ status: 'posted' });
-});
+// (removed — /api/post/now was fake, inserts without real API call)
 
 app.get('/api/settings', (req, res) => {
   const rows = db.prepare("SELECT key, value FROM settings").all();
@@ -1067,33 +1055,25 @@ app.post('/api/linkedin/post', async (req, res) => {
   }
 });
 
-app.get('/api/linkedin/profile', async (req, res) => {
+// (removed — /api/linkedin/profile, not used from frontend)
+
+app.get('/api/linkedin/status', (req, res) => {
   const token = db.prepare("SELECT * FROM linkedin_tokens ORDER BY id DESC LIMIT 1").get();
   if (!token) return res.json({ linked: false });
-
-  try {
-    const resp = await fetch('https://api.linkedin.com/v2/userinfo', {
-      headers: { 'Authorization': 'Bearer ' + token.access_token }
-    });
-    const data = await resp.json();
-    res.json({ linked: true, profile: data });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  const expired = token.expires_at && Date.now() > token.expires_at;
+  res.json({ linked: true, profile_urn: token.profile_urn, expired });
 });
 
+// ── Scheduler ────────────────────────────────────────────────────
 function scheduledPost() {
-  console.log('[scheduler] Checking for drafts to post...');
   const now = new Date().toISOString().substring(0, 16);
   const rows = db.prepare("SELECT * FROM drafts WHERE status='scheduled' AND scheduled_at <= ?").all(now);
   const token = db.prepare("SELECT * FROM linkedin_tokens ORDER BY id DESC LIMIT 1").get();
   for (const r of rows) {
     console.log('[scheduler] Auto-posting draft #' + r.id);
     if (token && token.access_token) {
-      // Post via LinkedIn API
       postToLinkedIn(token, r);
     } else {
-      // Fallback: mark as posted locally
       db.prepare("INSERT INTO posts (draft_id, platform, post_url) VALUES (?,?,?)").run(r.id, 'linkedin', '');
       db.prepare("UPDATE drafts SET status='posted', posted_at=datetime('now') WHERE id=?").run(r.id);
     }
