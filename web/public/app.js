@@ -401,8 +401,66 @@ function renderSettings() {
       <div class="form-group"><label class="form-label">Tone</label><input type="text" id="sTone" value="${state.settings.tone||'professional-santai'}"></div>
       <div class="form-group"><label class="form-label">Posting Times (comma-separated, 24h)</label><input type="text" id="sTimes" value="${state.settings.post_times||'07:00,19:00'}"></div>
       <div class="form-group"><label class="form-label">Max Posts / Day</label><input type="number" id="sMax" value="${state.settings.max_posts||'2'}"></div>
+      <div class="form-group"><label class="form-label">AI Model</label><input type="text" id="sModel" value="${state.settings.model||'qwen3.6-plus'}"></div>
       <button class="btn btn-primary" onclick="return saveSettings()">Save</button>
     </div>
+    <div class="card">
+      <div class="card-title">Repliz — Social Media Publisher</div>
+      <div style="font-size:.75rem;color:var(--text3);margin-bottom:8px">Hubungkan Repliz untuk publish otomatis ke Threads, Instagram, LinkedIn, dll. Daftar di <a href="https://repliz.com" target="_blank">repliz.com</a></div>
+      <div id="replizStatus" style="font-size:.85rem;margin-bottom:8px">${state.settings.repliz_access_key ? 'Cek koneksi...' : 'Belum dikonfigurasi'}</div>
+      <div class="form-group"><label class="form-label">Access Key</label><input type="password" id="sReplizAccess" value="${state.settings.repliz_access_key||''}" placeholder="9221167021"></div>
+      <div class="form-group"><label class="form-label">Secret Key</label><input type="password" id="sReplizSecret" value="${state.settings.repliz_secret_key||''}" placeholder="c1nNqv947lfwBtMye..."></div>
+      <div class="form-group"><label class="form-label">Default Platform</label>
+        <select id="sReplizPlatform">
+          <option value="threads" ${state.settings.repliz_platform==='threads'?'selected':''}>Threads</option>
+          <option value="linkedin" ${state.settings.repliz_platform==='linkedin'?'selected':''}>LinkedIn</option>
+          <option value="instagram" ${state.settings.repliz_platform==='instagram'?'selected':''}>Instagram</option>
+          <option value="facebook" ${state.settings.repliz_platform==='facebook'?'selected':''}>Facebook</option>
+          <option value="tiktok" ${state.settings.repliz_platform==='tiktok'?'selected':''}>TikTok</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-primary btn-sm" onclick="return saveReplizConfig()">Simpan & Test</button>
+        <button class="btn btn-sm" onclick="return checkRepliz()">Test Koneksi</button>
+        <span id="replizMsg" style="font-size:.75rem;align-self:center"></span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Auto-Agent Settings</div>
+      <div style="font-size:.75rem;color:var(--text3);margin-bottom:8px">Konfigurasi untuk agent research → copy → publish otomatis.</div>
+      <div class="form-group"><label class="form-label">Max Topics / Run</label><input type="number" id="sAgentLimit" value="${state.settings.agent_limit||'3'}"></div>
+      <div class="form-group"><label class="form-label">Default Output Platform</label>
+        <select id="sAgentPlatform">
+          <option value="linkedin" ${state.settings.agent_platform==='linkedin'?'selected':''}>LinkedIn</option>
+          <option value="threads" ${state.settings.agent_platform==='threads'?'selected':''}>Threads</option>
+          <option value="blog" ${state.settings.agent_platform==='blog'?'selected':''}>Blog</option>
+        </select>
+      </div>
+      <div class="form-group" style="display:flex;align-items:center;gap:12px">
+        <label class="form-label" style="margin:0">Auto-Publish setelah generate:</label>
+        <input type="checkbox" id="sAutoPublish" ${state.settings.auto_publish==='true'?'checked':''} style="width:auto">
+      </div>
+      <div style="margin-top:8px">
+        <button class="btn btn-primary btn-sm" onclick="return saveAgentConfig()">Save Agent Config</button>
+        <span id="agentMsg" style="font-size:.75rem;margin-left:8px"></span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Run Agent Now</div>
+      <div style="font-size:.75rem;color:var(--text3);margin-bottom:8px">Jalankan research → copywriting langsung dari sini.</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-primary" onclick="return runAgent()">▶ Jalankan Agent</button>
+        <span id="agentRunMsg" style="font-size:.75rem"></span>
+      </div>
+    </div>
+  `;
+  // Auto-check Repliz if configured
+  if (state.settings.repliz_access_key) checkRepliz();
+  renderKnowledgeBase();
+}
+
+function renderKnowledgeBase() {
+  main.innerHTML += `
     <div class="card">
       <div class="card-title">Knowledge Base</div>
       <div style="font-size:.85rem;color:var(--text2)">
@@ -421,7 +479,11 @@ async function saveSettings() {
   const data = {
     tone: $('sTone').value,
     post_times: $('sTimes').value,
-    max_posts: $('sMax').value
+    max_posts: $('sMax').value,
+    model: $('sModel').value,
+    repliz_access_key: $('sReplizAccess').value.trim(),
+    repliz_secret_key: $('sReplizSecret').value.trim(),
+    repliz_platform: $('sReplizPlatform').value
   };
   await fetch('/api/settings', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
   // Save writing style from JSON textarea
@@ -468,6 +530,72 @@ async function connectLinkedIn() {
     // Should redirect
     window.location.href = '/api/linkedin/login';
   }
+}
+
+/* ── Repliz Settings ── */
+async function checkRepliz() {
+  const acc = $('sReplizAccess').value.trim();
+  const sec = $('sReplizSecret').value.trim();
+  const el = $('replizStatus');
+  const msg = $('replizMsg');
+  el.innerHTML = 'Memeriksa...';
+  msg.textContent = '';
+  try {
+    const r = await fetch('/api/repliz/check', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ access_key: acc, secret_key: sec })
+    });
+    const d = await r.json();
+    if (d.connected) {
+      el.innerHTML = `<span style="color:var(--green)">✓ Connected</span> — ${(d.accounts||[]).map(a => a.type+'/'+a.username).join(', ') || 'no accounts'}`;
+      msg.innerHTML = '<span style="color:var(--green)">✓ OK</span>';
+    } else {
+      el.innerHTML = `<span style="color:var(--red)">✗ ${d.message || 'Failed'}</span>`;
+    }
+  } catch(e) {
+    el.innerHTML = `<span style="color:var(--red)">✗ ${e.message}</span>`;
+  }
+}
+
+async function saveReplizConfig() {
+  const data = {
+    repliz_access_key: $('sReplizAccess').value.trim(),
+    repliz_secret_key: $('sReplizSecret').value.trim(),
+    repliz_platform: $('sReplizPlatform').value
+  };
+  await fetch('/api/settings', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  await fetchData();
+  await checkRepliz();
+}
+
+async function saveAgentConfig() {
+  const data = {
+    agent_limit: $('sAgentLimit').value,
+    agent_platform: $('sAgentPlatform').value,
+    auto_publish: $('sAutoPublish').checked ? 'true' : 'false'
+  };
+  await fetch('/api/settings', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  await fetchData();
+  $('agentMsg').textContent = '✓ Saved';
+  setTimeout(() => $('agentMsg').textContent = '', 2000);
+}
+
+async function runAgent() {
+  const btn = document.querySelector('[onclick="return runAgent()"]');
+  const msg = $('agentRunMsg');
+  btn.disabled = true;
+  btn.textContent = '⏳ Running...';
+  msg.textContent = 'Research → Copywriting...';
+  try {
+    const r = await fetch('/api/agent/run', {method:'POST'});
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    msg.innerHTML = `<span style="color:var(--green)">✅ ${d.drafts} draft dibuat</span>`;
+  } catch(e) {
+    msg.innerHTML = `<span style="color:var(--red)">❌ ${e.message}</span>`;
+  }
+  btn.disabled = false;
+  btn.textContent = '▶ Jalankan Agent';
 }
 
 /* ── Draft Preview ── */

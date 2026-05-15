@@ -678,6 +678,125 @@ app.post('/api/writing-style/reset', (req, res) => {
   res.json({ status: 'reset', style: DEFAULT_WRITING_STYLE });
 });
 
+// ── Repliz API ─────────────────────────────────────────────────────
+app.post('/api/repliz/check', async (req, res) => {
+  try {
+    const { access_key, secret_key } = req.body;
+    if (!access_key || !secret_key) return res.json({ connected: false, message: 'Isi access key & secret key' });
+
+    // Save to DB
+    db.prepare("INSERT INTO settings (key,value) VALUES ('repliz_access_key',?) ON CONFLICT(key) DO UPDATE SET value=?").run(access_key, access_key);
+    db.prepare("INSERT INTO settings (key,value) VALUES ('repliz_secret_key',?) ON CONFLICT(key) DO UPDATE SET value=?").run(secret_key, secret_key);
+
+    // Test connection
+    const base64 = Buffer.from(access_key + ':' + secret_key).toString('base64');
+    const resp = await fetch('https://api.repliz.com/public/account?page=1&limit=20', {
+      headers: { 'Authorization': 'Basic ' + base64 }
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      return res.json({ connected: false, message: data.message || 'Unauthorized' });
+    }
+    const data = await resp.json();
+    res.json({ connected: true, accounts: (data.docs || []).map(a => ({ type: a.type, username: a.username, connected: a.isConnected })) });
+  } catch(e) {
+    res.json({ connected: false, message: e.message });
+  }
+});
+
+// ── Agent Runner ────────────────────────────────────────────────────
+app.post('/api/agent/run', async (req, res) => {
+  try {
+    const settings = {};
+    db.prepare("SELECT key, value FROM settings").all().forEach(r => settings[r.key] = r.value);
+
+    const limit = parseInt(settings.agent_limit || '3');
+    const platform = settings.agent_platform || 'linkedin';
+    const autoPublish = settings.auto_publish === 'true';
+    const model = settings.model || 'qwen3.6-plus';
+    const aiKey = process.env.SUMOPOD_API_KEY || process.env.OPENAI_API_KEY || '';
+
+    if (!aiKey) return res.json({ error: 'SUMOPOD_API_KEY / OPENAI_API_KEY belum diset. Set di .env.' });
+
+    // Phase 1: Research — ambil trending topik dari DB, enrich pake AI
+    const rows = db.prepare("SELECT * FROM trends ORDER BY score DESC LIMIT ?").all(limit);
+    if (rows.length === 0) return res.json({ error: 'Tidak ada trending. Jalankan Trend Hunter dulu dari Dashboard.' });
+
+    const results = [];
+    for (const t of rows) {
+      // Phase 2: Generate copy
+      const fetchArticle = async (url) => {
+        try {
+          const resp = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(10000) });
+          const html = await resp.text();
+          return html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/&[^;]+;/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 2000);
+        } catch { return ''; }
+      };
+
+      const ctx = t.context || (t.source_url ? await fetchArticle(t.source_url) : '');
+      const prompt = `KAMU ADALAH COPYWRITER WARGA SIPIL INDONESIA. Pinter tapi CAPEK. Nada: jujur, sarkas, humble.
+
+FORMAT: ${platform}
+TOPIK: ${t.topic}
+
+LARANGAN MUTLAK:
+- SATU PARAGRAF UTUH. Bukan bullet list.
+- NO hashtag, NO emoji, NO bullet, NO bold
+- NO "gimana menurut lo", NO engagement bait
+- NO kata marketing: Jelajahi, Tingkatkan, Solusi, Inovatif
+
+STRUKTUR:
+1. HOOK tamparan realita baris pertama
+2. BODY satu paragraf, ngelantur alami
+3. CTA sindiran cuek
+
+KONTEKS: ${ctx.substring(0, 1000) || '-'}
+
+Output langsung copy siap publish.`;
+
+      const resp = await fetch((process.env.OPENAI_BASE_URL || 'https://ai.sumopod.com/v1') + '/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + aiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: model,
+          messages: [
+            { role: 'system', content: 'Kamu copywriter Indonesia. Nada warkop. Output langsung.' },
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0.8, max_tokens: 1024
+        })
+      });
+      const data = await resp.json();
+      let body = (data.choices?.[0]?.message?.content || '').replace(/#\w+/g, '').replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').replace(/^[-*+]\s+/gm, '').replace(/^\d+[.)]\s+/gm, '').trim();
+
+      const stmt = db.prepare("INSERT INTO drafts (topic_id, body, status, score, created_at) VALUES (?,?,'draft',7,datetime('now'))");
+      const info = stmt.run(t.id, body);
+      results.push({ id: info.lastInsertRowid, topic: t.topic });
+
+      // Phase 3: Auto-publish
+      if (autoPublish) {
+        try {
+          const tokenRow = db.prepare("SELECT * FROM linkedin_tokens ORDER BY id DESC LIMIT 1").get();
+          if (tokenRow && tokenRow.access_token && tokenRow.profile_urn) {
+            const linkedinResp = await fetch('https://api.linkedin.com/rest/posts', {
+              method: 'POST',
+              headers: { 'Authorization': 'Bearer ' + tokenRow.access_token, 'Content-Type': 'application/json', 'LinkedIn-Version': '202501' },
+              body: JSON.stringify({ author: tokenRow.profile_urn, lifecycleState: 'PUBLISHED', visibility: 'PUBLIC', commentary: body })
+            });
+            if (linkedinResp.ok) {
+              db.prepare("UPDATE drafts SET status='posted' WHERE id=?").run(info.lastInsertRowid);
+            }
+          }
+        } catch(e) { /* publish gagal, lanjut */ }
+      }
+    }
+
+    res.json({ drafts: results.length, list: results });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── Copywriter ────────────────────────────────────────────────────
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.SUMOPOD_API_KEY || '';
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://ai.sumopod.com/v1';
