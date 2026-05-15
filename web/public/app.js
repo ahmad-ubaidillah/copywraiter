@@ -1,0 +1,341 @@
+/* copywrAIter — Frontend App */
+
+let state = { page: 'dashboard', drafts: [], trends: [], posts: [], settings: {}, profile: {} };
+const $ = id => document.getElementById(id);
+const main = $('mainContent');
+
+/* ── Routing ── */
+function route(page) {
+  state.page = page;
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.page === page));
+  render();
+  return false;
+}
+
+/* ── Render ── */
+async function render() {
+  const pages = {
+    dashboard: renderDashboard,
+    trends: renderTrends,
+    drafts: renderDrafts,
+    history: renderHistory,
+    profile: renderProfile,
+    settings: renderSettings
+  };
+  main.innerHTML = '<div class="loader"><div class="spinner"></div><p>Loading...</p></div>';
+  try { await fetchData(); pages[state.page](); }
+  catch(e) { main.innerHTML = '<div class="empty"><h2>Error</h2><p>' + e.message + '</p></div>'; }
+}
+
+async function fetchData() {
+  const [s, t, d, h, p, st] = await Promise.all([
+    fetch('/api/status').then(r=>r.json()),
+    fetch('/api/trends').then(r=>r.json()),
+    fetch('/api/drafts').then(r=>r.json()),
+    fetch('/api/history').then(r=>r.json()),
+    fetch('/api/profile').then(r=>r.json()),
+    fetch('/api/settings').then(r=>r.json())
+  ]);
+  state.status = s; state.trends = t.trends || [];
+  state.drafts = d.drafts || []; state.posts = h.posts || [];
+  state.profile = p.profile || {}; state.settings = st;
+  $('statusBadge').textContent = '● ' + (s.status || 'unknown');
+  $('footerStats').textContent = state.drafts.length + ' drafts · ' + state.posts.length + ' posted';
+}
+
+/* ── Dashboard ── */
+function renderDashboard() {
+  const s = state.status?.stats || {};
+  main.innerHTML = `
+    <div class="stats-row">
+      <div class="stat-card"><div class="stat-value">${s.trends||0}</div><div class="stat-label">Trends Today</div></div>
+      <div class="stat-card"><div class="stat-value">${s.drafts||0}</div><div class="stat-label">Drafts</div></div>
+      <div class="stat-card"><div class="stat-value">${s.posts||0}</div><div class="stat-label">Posted</div></div>
+      <div class="stat-card"><div class="stat-value">${state.drafts.filter(d=>d.status==='scheduled').length}</div><div class="stat-label">Scheduled</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Recent Trends</div>
+      ${state.trends.length === 0 ? '<div class="empty"><p>No trends yet. Run trend hunter to get started.</p></div>' :
+        '<table><tr><th>Topic</th><th>Score</th><th>Source</th><th></th></tr>' +
+        state.trends.slice(0,5).map(t => `<tr>
+          <td>${esc(t.topic)}</td>
+          <td>${t.score}</td>
+          <td>${esc(t.source)}</td>
+          <td><a href="#" onclick="return generateDraft(${t.id},'${escAttr(t.topic)}')">Generate</a></td>
+        </tr>`).join('') + '</table>'
+      }
+    </div>
+    <div class="card">
+      <div class="card-title">Next Scheduled Post</div>
+      ${scheduledDraft()}
+    </div>
+  `;
+}
+
+function scheduledDraft() {
+  const next = state.drafts.filter(d => d.status === 'scheduled').sort((a,b) => a.scheduled_at?.localeCompare(b.scheduled_at))[0];
+  if (!next) return '<div class="empty"><p>No scheduled posts.</p></div>';
+  return `<div>${esc(next.topic || next.body?.substring(0,80))}</div><div style="color:var(--text2);font-size:.8rem">${next.scheduled_at}</div>`;
+}
+
+/* ── Trends ── */
+function renderTrends() {
+  main.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2>Trending Topics</h2>
+      <button class="btn btn-primary btn-sm" onclick="return fetchTrends()">Refresh</button>
+    </div>
+    ${state.trends.length === 0 ? '<div class="empty"><h2>No Trends</h2><p>Click Refresh to fetch latest trends.</p></div>' :
+      '<table><tr><th>Topic</th><th>Score</th><th>Source</th><th>Angle</th><th></th></tr>' +
+      state.trends.map(t => `<tr>
+        <td><strong>${esc(t.topic)}</strong></td>
+        <td><span class="tag">${t.score}</span></td>
+        <td>${esc(t.source)}</td>
+        <td>${esc(t.angle)}</td>
+        <td><a href="#" onclick="return generateDraft(${t.id},'${escAttr(t.topic)}')">Generate</a></td>
+      </tr>`).join('') + '</table>'
+    }
+  `;
+}
+
+async function fetchTrends() {
+  main.innerHTML = '<div class="loader"><div class="spinner"></div><p>Scraping trends...</p></div>';
+  try {
+    const r = await fetch('/api/trends/refresh', {method:'POST'});
+    const d = await r.json();
+    await fetchData();
+    renderTrends();
+  } catch(e) {
+    main.innerHTML = `<div class="empty"><h2>Error</h2><p>${e.message}</p></div>`;
+  }
+}
+
+/* ── Drafts ── */
+function renderDrafts() {
+  const grouped = {};
+  ['draft','approved','scheduled','posted','rejected'].forEach(s => grouped[s] = state.drafts.filter(d => d.status === s));
+  main.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2>Drafts</h2>
+      <button class="btn btn-primary btn-sm" onclick="return showGenerateForm()">+ New Draft</button>
+    </div>
+    ${['draft','approved','scheduled','posted','rejected'].map(s => `
+      ${grouped[s].length === 0 ? '' : `
+        <div class="card">
+          <div class="card-title">${s.charAt(0).toUpperCase()+s.slice(1)} (${grouped[s].length})</div>
+          <table>
+            <tr><th>Topic</th><th>Preview</th><th>Score</th><th>Scheduled</th><th></th></tr>
+            ${grouped[s].map(d => `<tr>
+              <td>${esc(d.topic||'—')}</td>
+              <td>${esc(d.body?.substring(0,60))}...</td>
+              <td><span class="tag">${d.score||'—'}</span></td>
+              <td style="font-size:.75rem">${d.scheduled_at ? d.scheduled_at.substring(0,16) : '—'}</td>
+              <td>${actionButtons(d)}</td>
+            </tr>`).join('')}
+          </table>
+        </div>`
+      }
+    `).join('')}
+    ${state.drafts.length === 0 ? '<div class="empty"><h2>No Drafts</h2><p>Generate your first draft from trending topics.</p></div>' : ''}
+  `;
+}
+
+function actionButtons(d) {
+  if (d.status === 'draft') return `<button class="btn btn-sm btn-success" onclick="return approveDraft(${d.id})">Approve</button> <button class="btn btn-sm btn-danger" onclick="return rejectDraft(${d.id})">Reject</button>`;
+  if (d.status === 'approved') return `<button class="btn btn-sm" onclick="return scheduleDraft(${d.id})">Schedule</button> <button class="btn btn-sm btn-primary" onclick="return postNow(${d.id})">Post Now</button>`;
+  if (d.status === 'rejected') return `<span style="color:var(--red);font-size:.75rem">Rejected</span>`;
+  return `<span style="color:var(--text3);font-size:.75rem">${d.status}</span>`;
+}
+
+async function approveDraft(id) {
+  await fetch('/api/draft/'+id+'/approve', {method:'POST'});
+  await fetchData(); renderDrafts();
+}
+async function rejectDraft(id) {
+  await fetch('/api/draft/'+id+'/reject', {method:'POST'});
+  await fetchData(); renderDrafts();
+}
+async function postNow(id) {
+  if (!confirm('Post this draft now?')) return;
+  await fetch('/api/post/now', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({draft_id:id})});
+  await fetchData(); renderDrafts();
+}
+
+function showGenerateForm() {
+  main.innerHTML = `
+    <div class="card">
+      <div class="card-title">Generate New Draft</div>
+      <div class="form-group">
+        <label class="form-label">Topic / Idea</label>
+        <input type="text" id="draftTopic" placeholder="e.g. AI trends 2026" value="${state.trends[0]?.topic||''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Draft Body</label>
+        <textarea id="draftBody" placeholder="Write draft content or let AI generate..."></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Hashtags</label>
+        <input type="text" id="draftHashtags" placeholder="#AI #Automation">
+      </div>
+      <button class="btn btn-primary" onclick="return saveDraft()">Save Draft</button>
+    </div>
+  `;
+}
+
+async function saveDraft() {
+  const body = $('draftBody').value;
+  if (!body) { alert('Write something'); return; }
+  await fetch('/api/draft/generate', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({body, hashtags:$('draftHashtags').value, topic_id:null})
+  });
+  await fetchData(); route('drafts');
+}
+
+/* ── History ── */
+function renderHistory() {
+  main.innerHTML = `
+    <h2 style="margin-bottom:12px">Post History</h2>
+    ${state.posts.length === 0 ? '<div class="empty"><h2>No Posts Yet</h2><p>Posts will appear here after publishing.</p></div>' :
+      '<table><tr><th>Date</th><th>Content</th><th>Likes</th><th>Comments</th><th>Shares</th><th>Views</th></tr>' +
+      state.posts.map(p => `<tr>
+        <td style="font-size:.75rem">${p.posted_at?.substring(0,10)||'—'}</td>
+        <td>${esc(p.draft_body?.substring(0,80))}...</td>
+        <td>${p.likes||0}</td>
+        <td>${p.comments||0}</td>
+        <td>${p.shares||0}</td>
+        <td>${p.views||0}</td>
+      </tr>`).join('') + '</table>'
+    }
+  `;
+}
+
+/* ── Profile ── */
+function renderProfile() {
+  const p = state.profile;
+  main.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2>LinkedIn Profile</h2>
+      <button class="btn btn-sm" onclick="return loadSuggestions()">AI Suggestions</button>
+    </div>
+    <div class="card">
+      <div class="card-title">${esc(p.personal_info?.display_name||'Name not set')}</div>
+      <div style="color:var(--text2)">${esc(p.personal_info?.headline||'')}</div>
+      <div style="color:var(--text3);font-size:.8rem;margin-top:4px">${esc(p.personal_info?.location||'')}</div>
+    </div>
+    <div class="card">
+      <div class="card-title">About</div>
+      <p style="color:var(--text2);font-size:.85rem">${esc(p.about?.current||p.about?.goal||'Not set. Edit in knowledge_base/profile.json')}</p>
+    </div>
+    <div class="card">
+      <div class="card-title">Experience (${(p.experience||[]).length})</div>
+      ${(p.experience||[]).length === 0 ? '<div style="color:var(--text3)">No experience listed.</div>' :
+        (p.experience||[]).map(e => `<div style="margin-bottom:8px"><strong>${esc(e.title)}</strong> @ ${esc(e.company)} <span style="color:var(--text3);font-size:.75rem">${e.start_date||''} — ${e.end_date||''}</span></div>`).join('')}
+    </div>
+    <div class="card">
+      <div class="card-title">Skills</div>
+      ${(p.skills||[]).map(s => `<span class="tag">${esc(s)}</span>`).join(' ') || '<span style="color:var(--text3)">No skills listed.</span>'}
+    </div>
+  `;
+}
+
+async function loadSuggestions() {
+  main.innerHTML = '<div class="loader"><div class="spinner"></div><p>Analyzing profile...</p></div>';
+  try {
+    const r = await fetch('/api/profile/suggestions');
+    const d = await r.json();
+    const suggestions = d.suggestions || [];
+    main.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2>Profile Suggestions</h2>
+        <button class="btn btn-sm" onclick="return route('profile')">Back</button>
+      </div>
+      ${suggestions.length === 0 ? '<div class="empty"><h2>No Suggestions</h2><p>AI optimization coming soon.</p></div>' :
+        suggestions.map(s => `
+          <div class="card">
+            <div style="color:var(--text2);font-size:.75rem;text-transform:uppercase;margin-bottom:4px">${esc(s.field)} — <span class="status-${s.status}">${s.status}</span></div>
+            <div style="margin:8px 0;padding:8px;background:var(--bg);border-radius:var(--radius)">
+              <div style="font-size:.75rem;color:var(--text3)">Suggested:</div>
+              ${esc(s.new_text)}
+            </div>
+            <div style="font-size:.8rem;color:var(--text2)">${esc(s.reason)}</div>
+            ${s.status === 'pending' ? `<div style="margin-top:8px"><button class="btn btn-sm btn-success" onclick="return approveSuggestion(${s.id})">Approve</button></div>` : ''}
+          </div>
+        `).join('')
+      }
+    `;
+  } catch(e) {
+    main.innerHTML = `<div class="empty"><h2>Error</h2><p>${e.message}</p></div>`;
+  }
+}
+
+async function approveSuggestion(id) {
+  await fetch('/api/profile/suggestion/'+id+'/approve', {method:'POST'});
+  await loadSuggestions();
+}
+
+/* ── Settings ── */
+function renderSettings() {
+  main.innerHTML = `
+    <h2 style="margin-bottom:12px">Settings</h2>
+    <div class="card">
+      <div class="card-title">Brand Voice</div>
+      <div class="form-group"><label class="form-label">Tone</label><input type="text" id="sTone" value="${state.settings.tone||'professional-santai'}"></div>
+      <div class="form-group"><label class="form-label">Posting Times (comma-separated, 24h)</label><input type="text" id="sTimes" value="${state.settings.post_times||'07:00,19:00'}"></div>
+      <div class="form-group"><label class="form-label">Max Posts / Day</label><input type="number" id="sMax" value="${state.settings.max_posts||'2'}"></div>
+      <button class="btn btn-primary" onclick="return saveSettings()">Save</button>
+    </div>
+    <div class="card">
+      <div class="card-title">Knowledge Base</div>
+      <div style="font-size:.85rem;color:var(--text2)">
+        <p>Edit files directly in <code>knowledge_base/</code>:</p>
+        <ul style="margin:8px 0 0 16px">
+          <li><code>profile.json</code> — your LinkedIn data</li>
+          <li><code>brand_voice.json</code> — tone, style, hashtags</li>
+          <li><code>content_calendar.json</code> — schedule config</li>
+        </ul>
+      </div>
+    </div>
+  `;
+}
+
+async function saveSettings() {
+  const data = {
+    tone: $('sTone').value,
+    post_times: $('sTimes').value,
+    max_posts: $('sMax').value
+  };
+  await fetch('/api/settings', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  await fetchData();
+  alert('Settings saved');
+}
+
+/* ── Actions from Trends ── */
+async function generateDraft(topicId, topicName) {
+  main.innerHTML = '<div class="loader"><div class="spinner"></div><p>Generating draft...</p></div>';
+  const body = `[Draft about: ${topicName}]\n\nGenerated by AI. Replace this with real copywriter integration.`;
+  await fetch('/api/draft/generate', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({body, hashtags:'#PersonalBranding #LinkedIn', topic_id:topicId})
+  });
+  await fetchData();
+  route('drafts');
+}
+
+/* ── Schedule ── */
+async function scheduleDraft(id) {
+  const date = prompt('Schedule date/time (YYYY-MM-DDTHH:MM):');
+  if (!date) return;
+  await fetch('/api/draft/'+id+'/schedule', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({scheduled_at: date})
+  });
+  await fetchData(); renderDrafts();
+}
+
+/* ── Escape ── */
+function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function escAttr(s) { return (s||'').replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
+
+/* ── Init ── */
+document.addEventListener('DOMContentLoaded', () => render());

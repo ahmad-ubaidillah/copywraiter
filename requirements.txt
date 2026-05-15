@@ -1,0 +1,8 @@
+flask==3.1.*
+requests==2.32.*
+beautifulsoup4==4.13.*
+apscheduler==3.11.*
+openai==1.75.*
+gunicorn==23.*
+python-dotenv==1.1.*
+playwright==1.53.*

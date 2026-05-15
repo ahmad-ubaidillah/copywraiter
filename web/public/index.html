@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>copywrAIter — Personal Branding Agent</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="#" class="logo" onclick="return route('dashboard')">copywrAIter</a>
+    <div class="nav-right">
+      <span class="badge" id="statusBadge">● idle</span>
+    </div>
+  </div>
+</nav>
+
+<div class="layout">
+  <aside class="sidebar">
+    <a href="#" class="nav-item active" data-page="dashboard" onclick="return route('dashboard')">Dashboard</a>
+    <a href="#" class="nav-item" data-page="trends" onclick="return route('trends')">Trends</a>
+    <a href="#" class="nav-item" data-page="drafts" onclick="return route('drafts')">Drafts</a>
+    <a href="#" class="nav-item" data-page="history" onclick="return route('history')">History</a>
+    <a href="#" class="nav-item" data-page="profile" onclick="return route('profile')">Profile</a>
+    <a href="#" class="nav-item" data-page="settings" onclick="return route('settings')">Settings</a>
+  </aside>
+  <main class="content" id="mainContent">
+    <div class="loader"><div class="spinner"></div><p>Loading...</p></div>
+  </main>
+</div>
+
+<footer class="footer">
+  <span>copywrAIter v1.0</span>
+  <span id="footerStats"></span>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

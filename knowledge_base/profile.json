@@ -1,0 +1,27 @@
+{
+  "personal_info": {
+    "full_name": "",
+    "display_name": "",
+    "headline": "",
+    "location": "Indonesia",
+    "industry": "Information Technology & Services"
+  },
+  "about": {
+    "current": "",
+    "target_audience": "",
+    "goal": ""
+  },
+  "experience": [],
+  "education": [],
+  "skills": [],
+  "certifications": [],
+  "languages": [
+    { "language": "Indonesia", "proficiency": "Native" },
+    { "language": "English", "proficiency": "Professional" }
+  ],
+  "urls": {
+    "github": "",
+    "website": "",
+    "portfolio": ""
+  }
+}

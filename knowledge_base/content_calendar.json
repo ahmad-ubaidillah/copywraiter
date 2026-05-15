@@ -1,0 +1,9 @@
+{
+  "schedule": {
+    "times_per_day": 2,
+    "preferred_hours": ["07:00", "19:00"],
+    "timezone": "Asia/Jakarta"
+  },
+  "posting_days": ["monday", "tuesday", "wednesday", "thursday", "friday"],
+  "weekend_posting": false
+}

@@ -1,0 +1,41 @@
+{
+  "tone": {
+    "primary": "professional-santai",
+    "description": "",
+    "vibes": []
+  },
+  "language": {
+    "primary": "id",
+    "style": "Indonesia informal, campur istilah Inggris dikit",
+    "avoid": [
+      "klise kayak 'synergy', 'leverage', 'think outside the box'",
+      "bahasa terlalu formal kaku",
+      "sok tahu / bombastis"
+    ]
+  },
+  "post_style": {
+    "hook": "Buka dengan pertanyaan atau pernyataan yang bikin penasaran",
+    "storytelling": "Ada struktur: masalah → proses → pelajaran",
+    "ending": "Call to action ringan",
+    "length": "500-1500 karakter",
+    "formatting": "Paragraf pendek, sparing pake line breaks"
+  },
+  "content_mix": {
+    "thought_leadership": { "pct": 35, "description": "Pendapat orisinal tentang tren industri" },
+    "tutorial_tips": { "pct": 30, "description": "Step-by-step, tips, trik" },
+    "personal_story": { "pct": 20, "description": "Cerita dari pengalaman nyata" },
+    "engagement": { "pct": 10, "description": "Poll, question, diskusi" },
+    "repost_opinion": { "pct": 5, "description": "Share post orang + komentar" }
+  },
+  "hashtag_strategy": {
+    "max_per_post": 5,
+    "preferred": [],
+    "avoid": ["#follow", "#like", "#viral"]
+  },
+  "topics_to_avoid": [
+    "Politik Indonesia",
+    "SARA",
+    "Kontroversi perusahaan tertentu",
+    "Gosip industri"
+  ]
+}
