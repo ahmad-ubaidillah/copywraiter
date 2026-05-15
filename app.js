@@ -510,7 +510,8 @@ async function runTrendHunter() {
 }
 
 // ── Copywriter ────────────────────────────────────────────────────
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.SUMOPOD_API_KEY || '';
+const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://ai.sumopod.com/v1';
 
 function loadKnowledgeBase() {
   const profilePath = path.join(BASE, 'knowledge_base', 'profile.json');
@@ -555,57 +556,101 @@ function brandCoachScore(draft, profile, voice) {
 
 app.post('/api/draft/generate-ai', async (req, res) => {
   try {
-    const { topic_id, topic, tone } = req.body;
+    const { topic_id, topic, tone, context } = req.body;
     const { profile, voice } = loadKnowledgeBase();
     const brandVoice = voice.tone?.primary || tone || 'professional-santai';
     const displayName = profile.personal_info?.display_name || 'Personal Branding Expert';
     const headline = profile.personal_info?.headline || '';
 
-    // Build prompt
-    const prompt = `Kamu adalah ${displayName} (${headline}). 
-Tone: ${brandVoice}, natural, storytelling.
-Bahasa: Indonesia, seperti ngobrol santai tapi profesional.
-Topik: ${topic || 'personal branding'}
+    // Get context from trend if topic_id provided
+    let trendContext = context || '';
+    if (topic_id && !trendContext) {
+      const trend = db.prepare("SELECT * FROM trends WHERE id=?").get(topic_id);
+      if (trend) {
+        trendContext = trend.context || '';
+        if (trend.source_url) trendContext += '\\nSumber: ' + trend.source_url;
+      }
+    }
 
-Buat DRAFT LINKEDIN (max 1000 karakter):
-- Hook baris pertama bikin penasaran
-- Ada sudut pandang pribadi / pengalaman
-- Kasih value atau insight
-- Akhiri dengan pertanyaan diskusi
-- JANGAN pake klise
+    // Build prompt — v3: human storyteller & raw copywriter
+    let prompt = `IDENTITAS:
+Lo adalah temen tongkrongan yang skeptis tapi pinter. Lo nulis buat nge-share keresahan yang beneran ngena, bukan buat menuh-menuhin feed. Nada lo: capek, jujur, nyablak, tapi tetep logis.
 
-Tambahkan 3-5 hashtag di baris terakhir.
-Output: {"body": "...", "hashtags": "..."}`;
+SCOPE:
+Topik yang aman:
+- Keresahan hidup sehari-hari (harga pangan, macet, birokrasi)
+- Teknologi & gadget (dari kacamata user yang males ribet)
+- Kultur kerja & gaya hidup lokal Indonesia
+- Opini jujur soal brand/produk (soft-selling allowed)
+
+DILARANG:
+- Bahas politik berat, SARA, opini medis
+- Ngasih nasihat hidup / motivasi
+- Konten yang kerasa kayak press release perusahaan
+
+RULES:
+[HOOK]
+- Buka dengan tamparan kenyataan yang punchy & relatable
+- Jangan pake pertanyaan basi kayak "Apakah Anda lelah...?"
+
+[BODY]
+- Tulis dalam paragraf utuh (wall of text yang mengalir)
+- Pake analogi "nginjek bumi": harga gorengan, bensin, parkir, token listrik
+- Brand/produk bisa disebut sebagai solusi "kebetulan" di tengah omelan — jangan kayak iklan
+- Ganti kata-kata ini:
+  "digitalisasi" -> "urusan apa-apa pake HP"
+  "efisiensi" -> "nggak ribet / sat-set"
+  "transparansi" -> "kejujuran"
+  "mengalami peningkatan" -> "naik nggak ngotak"
+  "berkomitmen" -> "janji manis"
+
+[CTA]
+- Tutup dengan ajakan kasual buat cek sendiri atau diskusi
+- Low-pressure: "Coba lo cek sendiri deh", "Mendingan", "Eh lo pernah ngalamin juga?"
+- Boleh pake maksimal 1 emoji, kalo emang butuh banget
+
+[LARANGAN]
+- Jangan pake hashtag (#)
+- Jangan pake bullet points atau numbered lists
+- Jangan pake bolding / penebalan
+- Jangan pake kata: Jelajahi, Tingkatkan, Solusi, Inovatif, Revolusioner
+- Maksimal 1 emoji, kalo emang butuh
+
+Topik yang bakal lo bahas: ${topic || 'personal branding'}
+
+`;
+
+    if (trendContext) {
+      prompt += `KONTEKS:\n${trendContext}\n\n`;
+    }
+
+    prompt += `TULIS SEKARANG (max 1000 karakter):`;
 
     let draftBody = '';
-    let hashtags = '#PersonalBranding #LinkedIn';
+    let hashtags = '';
 
     if (OPENAI_API_KEY) {
-      const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      const resp = await fetch(OPENAI_BASE_URL + '/chat/completions', {
         method: 'POST',
         headers: {
           'Authorization': 'Bearer ' + OPENAI_API_KEY,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [{ role: 'user', content: prompt }],
+          model: process.env.OPENAI_MODEL || 'qwen/qwen3-30b-a3b-instruct-2507',
+          messages: [
+            { role: 'system', content: 'Kamu adalah penulis yang natural, kayak orang biasa ngomong. Gak usah pake markdown, bullet points, hashtag, atau format apapun. Tulis langsung aja.' },
+            { role: 'user', content: prompt }
+          ],
           max_tokens: 800,
-          temperature: 0.8
+          temperature: 0.9
         })
       });
       const data = await resp.json();
       const raw = data.choices?.[0]?.message?.content || '';
-      try {
-        const parsed = JSON.parse(raw);
-        draftBody = parsed.body || raw;
-        hashtags = parsed.hashtags || hashtags;
-      } catch {
-        draftBody = raw;
-      }
+      draftBody = raw.trim();
     } else {
-      // Fallback template
-      draftBody = `[AI Copywriter: set OPENAI_API_KEY di .env untuk generate otomatis]\n\nTopik: ${topic || 'personal branding'}\n\n${topic ? 'Ngomong-ngomong soal ' + topic + ', gue ada beberapa pemikiran...' : 'Gue mau bagi pengalaman tentang personal branding di LinkedIn...'}\n\nYang gue pelajari: konsistensi dan autentisitas itu jauh lebih penting daripada posting setiap hari. Lebih baik 2 post berkualitas per minggu daripada 7 post yang gak jelas.`;
+      draftBody = `[AI Copywriter: set OPENAI_API_KEY di .env untuk generate otomatis]\n\nTopik: ${topic || 'personal branding'}`;
     }
 
     // Humanize

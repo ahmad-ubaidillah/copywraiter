@@ -127,7 +127,7 @@ function renderDrafts() {
             <tr><th>Topic</th><th>Preview</th><th>Score</th><th>Scheduled</th><th></th></tr>
             ${grouped[s].map(d => `<tr>
               <td>${esc(d.topic||'—')}</td>
-              <td>${esc(d.body?.substring(0,60))}...</td>
+              <td><a href="#" onclick="return previewDraft(${d.id})" title="${escAttr(d.body?.substring(0,200))}">${esc(d.body?.substring(0,60))}...</a></td>
               <td><span class="tag">${d.score||'—'}</span></td>
               <td style="font-size:.75rem">${d.scheduled_at ? d.scheduled_at.substring(0,16) : '—'}</td>
               <td>${actionButtons(d)}</td>
@@ -363,6 +363,34 @@ async function connectLinkedIn() {
     // Should redirect
     window.location.href = '/api/linkedin/login';
   }
+}
+
+/* ── Draft Preview ── */
+function previewDraft(id) {
+  const draft = state.drafts.find(d => d.id === id);
+  if (!draft) return;
+  main.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2>${esc(draft.topic || 'Draft')}</h2>
+      <button class="btn btn-sm" onclick="return renderDrafts()">Back</button>
+    </div>
+    <div class="card">
+      <div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+        <span class="tag status-${draft.status}">${draft.status}</span>
+        <span class="tag">Score: ${draft.score||'—'}</span>
+        ${draft.scheduled_at ? `<span class="tag">Scheduled: ${draft.scheduled_at.substring(0,16)}</span>` : ''}
+      </div>
+      <div style="white-space:pre-wrap;font-size:.9rem;line-height:1.8;background:var(--bg);padding:16px;border-radius:var(--radius);border:1px solid var(--border)">
+${esc(draft.body)}
+      </div>
+      <div style="margin-top:12px;color:var(--text2);font-size:.85rem">
+        ${esc(draft.hashtags || '')}
+      </div>
+      <div style="margin-top:16px;display:flex;gap:8px">
+        ${actionButtons(draft)}
+      </div>
+    </div>
+  `;
 }
 
 /* ── Actions from Trends ── */
