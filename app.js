@@ -203,19 +203,21 @@ const BLACKLIST = ['k-pop','fanwar','fanbase','kazz','yoshi','dunk','joong',
 
 // Trivial words that are not meaningful content
 const TRIVIAL = new Set([
-  'libur','pagii','pagi','siang','sore','malam',
+  'libur','pagii','pagi','siang','sore','malam','jumatan',
   'senin','selasa','rabu','kamis','sabtu','minggu',
   'januari','februari','maret','april','mei','juni','juli','agustus','september','oktober','november','desember',
   'hallo','hello','hai','hi','test','testing','coba','ah','oh','wah',
-  'bismillah','alhamdulillah','subhanallah','astagfirullah'
+  'bismillah','alhamdulillah','subhanallah','astagfirullah',
+  'kenaikan yesus kristus','natal','idul fitri','idul adha','imlek','nyepi','tahun baru',
+  'beckham','canton','revan','jorji','mark lee','the economist','nobel','aston','kristiani','wakana yamazaki'
 ]);
 
 function isTrivial(topic) {
   const t = topic.toLowerCase().trim();
   if (t.length < 4 && !/[A-Za-z]{3,}/.test(t)) return true;
   if (TRIVIAL.has(t) || TRIVIAL.has(t.replace(/[^a-z]/g,''))) return true;
-  // Single very short word (1-3 chars) without context
-  if (!/\s/.test(t) && t.length <= 3 && !/tech|ai|pro|hub|id/i.test(t)) return true;
+  // Single short word without context — likely a name, not a trend
+  if (!/\s/.test(t) && t.length <= 8 && !/tech|ai|pro|hub|id|news|bank|digital|indonesia/i.test(t)) return true;
   return false;
 }
 
@@ -413,7 +415,8 @@ async function scrapeNewsSource(src) {
   try {
     const { url, selector, name: sourceName, minLen = 8, titleGroup = 1, urlGroup } = src;
     const resp = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36' }
+      headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36' },
+      signal: AbortSignal.timeout(8000)
     });
     const html = await resp.text();
     const matches = [...html.matchAll(new RegExp(selector, 'gi'))];
