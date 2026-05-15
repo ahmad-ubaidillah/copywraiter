@@ -315,39 +315,15 @@ function renderSettings() {
       </div>
     </div>
     <div class="card">
-      <div class="card-title">Writing Style</div>
-      <div id="writingStyleStatus"></div>
+      <div class="card-title">Writing Style (JSON — edit langsung)</div>
+      <div style="font-size:.75rem;color:var(--text3);margin-bottom:8px">Edit seluruh konfigurasi writing style. Format JSON. Hati-hati dengan koma dan tanda kutip.</div>
       <div class="form-group">
-        <label class="form-label">Persona (identity)</label>
-        <textarea id="wsPersona" rows="3">${state.writingStyle?.identity?.persona || ''}</textarea>
+        <textarea id="wsFull" rows="25" style="font-family:monospace;font-size:.8rem;white-space:pre;overflow:auto">${JSON.stringify(state.writingStyle, null, 2) || '{}'}</textarea>
       </div>
-      <div class="form-group">
-        <label class="form-label">Larangan (pisahkan dengan koma)</label>
-        <textarea id="wsForbidden" rows="4">${(state.writingStyle?.forbidden||[]).join(',\n')}</textarea>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Hook</label>
-        <input type="text" id="wsHook" value="${esc(state.writingStyle?.structure?.hook||'')}">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Body</label>
-        <textarea id="wsBody" rows="3">${esc(state.writingStyle?.structure?.body||'')}</textarea>
-      </div>
-      <div class="form-group">
-        <label class="form-label">CTA</label>
-        <input type="text" id="wsCTA" value="${esc(state.writingStyle?.structure?.cta||'')}">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Word Replacements (format: kata_asli → kata_ganti | ...)</label>
-        <input type="text" id="wsWords" value="${esc(state.writingStyle?.language?.word_replacements||'')}">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Analogy Map</label>
-        <input type="text" id="wsAnalogy" value="${esc(state.writingStyle?.analogy_map||'')}">
-      </div>
-      <div style="display:flex;gap:8px;margin-top:12px">
+      <div style="display:flex;gap:8px">
         <button class="btn btn-primary btn-sm" onclick="return saveWritingStyle()">Save Style</button>
         <button class="btn btn-sm" onclick="return resetWritingStyle()">Reset Default</button>
+        <span id="wsStatus" style="font-size:.75rem;color:var(--green);align-self:center"></span>
       </div>
     </div>
       <div class="form-group"><label class="form-label">Tone</label><input type="text" id="sTone" value="${state.settings.tone||'professional-santai'}"></div>
@@ -376,23 +352,19 @@ async function saveSettings() {
     max_posts: $('sMax').value
   };
   await fetch('/api/settings', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-  // Save writing style too
-  const ws = {
-    identity: { role: 'Custom', persona: $('wsPersona').value },
-    forbidden: $('wsForbidden').value.split('\n').map(s=>s.trim()).filter(Boolean),
-    structure: {
-      hook: $('wsHook').value,
-      body: $('wsBody').value,
-      cta: $('wsCTA').value
-    },
-    language: {
-      word_replacements: $('wsWords').value,
-      transition_words: '',
-      forbidden_phrases: ''
-    },
-    analogy_map: $('wsAnalogy').value
-  };
-  await fetch('/api/writing-style', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(ws)});
+  // Save writing style from JSON textarea
+  const wsEl = $('wsFull');
+  if (wsEl) {
+    try {
+      const ws = JSON.parse(wsEl.value);
+      await fetch('/api/writing-style', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(ws)});
+      const statusEl = $('wsStatus');
+      if (statusEl) statusEl.textContent = '✓ Saved at ' + new Date().toLocaleTimeString();
+    } catch(e) {
+      alert('JSON tidak valid: ' + e.message);
+      return;
+    }
+  }
   await fetchData();
   alert('Settings & Writing Style saved');
 }
