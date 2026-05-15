@@ -147,6 +147,19 @@ app.post('/api/draft/:id/schedule', (req, res) => {
   res.json({ status: 'scheduled' });
 });
 
+app.delete('/api/draft/:id', (req, res) => {
+  db.prepare("DELETE FROM drafts WHERE id=?").run(req.params.id);
+  res.json({ status: 'deleted' });
+});
+
+app.post('/api/drafts/delete-batch', (req, res) => {
+  const ids = req.body.ids || [];
+  if (!ids.length) return res.status(400).json({ error: 'No IDs' });
+  const stmt = db.prepare("DELETE FROM drafts WHERE id=?");
+  for (const id of ids) stmt.run(id);
+  res.json({ status: 'deleted', count: ids.length });
+});
+
 app.get('/api/history', (req, res) => {
   const rows = db.prepare("SELECT p.*, d.body as draft_body, d.hashtags FROM posts p JOIN drafts d ON p.draft_id=d.id ORDER BY p.posted_at DESC LIMIT 50").all();
   res.json({ posts: rows });
@@ -188,8 +201,107 @@ app.get('/api/profile/suggestions', (req, res) => {
 });
 
 app.post('/api/profile/suggestion/:id/approve', (req, res) => {
+  const row = db.prepare("SELECT * FROM profile_suggestions WHERE id=?").get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Suggestion not found' });
+
   db.prepare("UPDATE profile_suggestions SET status='approved' WHERE id=?").run(req.params.id);
+
+  // Apply to profile.json
+  const profilePath = path.join(BASE, 'knowledge_base', 'profile.json');
+  if (fs.existsSync(profilePath)) {
+    const profile = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+    if (row.field === 'headline') profile.personal_info = profile.personal_info || {};
+    if (row.field === 'headline') profile.personal_info.headline = row.new_text;
+    if (row.field === 'about') profile.about = profile.about || {};
+    if (row.field === 'about') profile.about.current = row.new_text;
+    if (row.field === 'summary') profile.about = profile.about || {};
+    if (row.field === 'summary') profile.about.goal = row.new_text;
+    fs.writeFileSync(profilePath, JSON.stringify(profile, null, 2), 'utf8');
+  }
+
   res.json({ status: 'approved' });
+});
+
+app.post('/api/profile/suggestion/:id/reject', (req, res) => {
+  db.prepare("UPDATE profile_suggestions SET status='rejected' WHERE id=?").run(req.params.id);
+  res.json({ status: 'rejected' });
+});
+
+app.post('/api/profile/optimize', async (req, res) => {
+  try {
+    const profilePath = path.join(BASE, 'knowledge_base', 'profile.json');
+    const profile = fs.existsSync(profilePath) ? JSON.parse(fs.readFileSync(profilePath, 'utf8')) : {};
+
+    // Clear old pending suggestions
+    db.prepare("DELETE FROM profile_suggestions WHERE status='pending'").run();
+
+    const suggestions = [];
+
+    if (OPENAI_API_KEY) {
+      const fields = [
+        { field: 'headline', label: 'headline LinkedIn', current: profile.personal_info?.headline || '' },
+        { field: 'about', label: 'tentang/about section', current: profile.about?.current || '' },
+        { field: 'summary', label: 'ringkasan profil (ringkasan goal/personal branding)', current: profile.about?.goal || '' }
+      ];
+
+      for (const f of fields) {
+        const prompt = `Kamu adalah personal branding coach untuk LinkedIn. Berikan 1 saran optimasi untuk ${f.label}.
+
+Profil saat ini:
+${f.current || '(kosong)'}
+
+Beri saran dalam bahasa Indonesia natural, singkat (max 100 kata). Format:
+SUGGESTION: (tulisan baru yang disarankan)
+REASON: (alasan kenapa perlu diganti)`;
+
+        const resp = await fetch(OPENAI_BASE_URL + '/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + OPENAI_API_KEY,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: process.env.OPENAI_MODEL || 'qwen/qwen3-30b-a3b-instruct-2507',
+            messages: [
+              { role: 'system', content: 'Kamu adalah personal branding coach. Jawab dalam Bahasa Indonesia. Format: SUGGESTION: ... REASON: ...' },
+              { role: 'user', content: prompt }
+            ],
+            temperature: 0.7,
+            max_tokens: 512
+          })
+        });
+        const data = await resp.json();
+        const text = data.choices?.[0]?.message?.content || '';
+        const sugMatch = text.match(/SUGGESTION:\s*(.+?)(?:\n|$)/i);
+        const reaMatch = text.match(/REASON:\s*(.+?)(?:\n|$)/i);
+        const newText = sugMatch ? sugMatch[1].trim() : text.substring(0, 150).trim();
+        const reason = reaMatch ? reaMatch[1].trim() : 'Optimasi untuk personal branding LinkedIn';
+
+        const stmt = db.prepare("INSERT INTO profile_suggestions (field, old_text, new_text, reason, status) VALUES (?,?,?,?,'pending')");
+        const info = stmt.run(f.field, f.current, newText, reason);
+        suggestions.push({ id: info.lastInsertRowid, field: f.field, original_text: f.current, new_text: newText, reason, status: 'pending' });
+      }
+    } else {
+      // Dummy suggestions — biar frontend bisa dipreview
+      const dummy = [
+        { field: 'headline', new_text: 'Software Engineer | Builder of stuff that (sometimes) works | Indonesia', reason: 'Headline lo kurang mencerminkan value proposition. Tambahin hook biar orang penasaran.' },
+        { field: 'about', new_text: 'Saya seorang developer yang suka bikin tools dan automasi. Dari ngoprek Linux sampai bikin AI agent buat personal branding — selama ada masalah, saya cari cara buat nyelesein. Percaya: teknologi harusnya ngebantu, bukan bikin ribet.', reason: 'About section terlalu formal dan nggak khas. Orang Indonesia butuh sentuhan personal biar relatable.' },
+        { field: 'summary', new_text: 'Mau ngebangun personal branding yang otentik di LinkedIn. Target: bikin konten yang jujur, nyablak, dan berguna buat sesama dev Indonesia.', reason: 'Goal masih belum jelas. Personal branding perlu arah yang spesifik.' }
+      ];
+      for (const d of dummy) {
+        const orig = d.field === 'headline' ? (profile.personal_info?.headline||'') :
+                     d.field === 'about' ? (profile.about?.current||'') :
+                     (profile.about?.goal||'');
+        const stmt = db.prepare("INSERT INTO profile_suggestions (field, old_text, new_text, reason, status) VALUES (?,?,?,?,'pending')");
+        const info = stmt.run(d.field, orig, d.new_text, d.reason);
+        suggestions.push({ id: info.lastInsertRowid, field: d.field, original_text: orig, new_text: d.new_text, reason: d.reason, status: 'pending' });
+      }
+    }
+
+    res.json({ suggestions });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // SPA fallback — catch-all for non-API, non-static routes

@@ -113,26 +113,72 @@ async function fetchTrends() {
 }
 
 /* ── Drafts ── */
+let selectedDrafts = new Set();
+
+function toggleDraftSelect(id) {
+  if (selectedDrafts.has(id)) selectedDrafts.delete(id);
+  else selectedDrafts.add(id);
+  renderDrafts();
+}
+
+function toggleSelectAll() {
+  const all = state.drafts.filter(d => d.status === 'draft' || d.status === 'approved');
+  if (selectedDrafts.size === all.length) selectedDrafts.clear();
+  else all.forEach(d => selectedDrafts.add(d.id));
+  renderDrafts();
+}
+
+async function deleteSelectedDrafts() {
+  if (selectedDrafts.size === 0) return;
+  if (!confirm(`Hapus ${selectedDrafts.size} draft?`)) return;
+  await fetch('/api/drafts/delete-batch', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ids: [...selectedDrafts]})
+  });
+  selectedDrafts.clear();
+  await fetchData();
+  renderDrafts();
+}
+
+async function deleteDraft(id) {
+  if (!confirm('Hapus draft ini?')) return;
+  await fetch('/api/draft/'+id, {method:'DELETE'});
+  selectedDrafts.delete(id);
+  await fetchData();
+  renderDrafts();
+}
+
 function renderDrafts() {
   const grouped = {};
   ['draft','approved','scheduled','posted','rejected'].forEach(s => grouped[s] = state.drafts.filter(d => d.status === s));
+  const selectable = state.drafts.filter(d => d.status === 'draft' || d.status === 'approved');
+  const allSelected = selectable.length > 0 && selectedDrafts.size === selectable.length;
   main.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
       <h2>Drafts</h2>
-      <button class="btn btn-primary btn-sm" onclick="return showGenerateForm()">+ New Draft</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        ${selectable.length > 0 ? `
+          <label style="font-size:.8rem;display:flex;align-items:center;gap:4px;cursor:pointer">
+            <input type="checkbox" onchange="toggleSelectAll()" ${allSelected ? 'checked' : ''}> Select All
+          </label>
+          <button class="btn btn-sm btn-danger" onclick="deleteSelectedDrafts()" ${selectedDrafts.size === 0 ? 'disabled style="opacity:0.4"' : ''}>Hapus (${selectedDrafts.size})</button>
+        ` : ''}
+        <button class="btn btn-primary btn-sm" onclick="return showGenerateForm()">+ New Draft</button>
+      </div>
     </div>
     ${['draft','approved','scheduled','posted','rejected'].map(s => `
       ${grouped[s].length === 0 ? '' : `
         <div class="card">
           <div class="card-title">${s.charAt(0).toUpperCase()+s.slice(1)} (${grouped[s].length})</div>
           <table>
-            <tr><th>Topic</th><th>Preview</th><th>Score</th><th>Scheduled</th><th></th></tr>
+            <tr><th>${s === 'draft' || s === 'approved' ? '<input type="checkbox">' : ''}</th><th>Topic</th><th>Preview</th><th>Score</th><th>Scheduled</th><th></th></tr>
             ${grouped[s].map(d => `<tr>
+              ${s === 'draft' || s === 'approved' ? `<td><input type="checkbox" onchange="toggleDraftSelect(${d.id})" ${selectedDrafts.has(d.id) ? 'checked' : ''}></td>` : '<td></td>'}
               <td>${esc(d.topic||'—')}</td>
               <td><a href="#" onclick="return previewDraft(${d.id})" title="${escAttr(d.body?.substring(0,200))}">${esc(d.body?.substring(0,60))}...</a></td>
               <td><span class="tag">${d.score||'—'}</span></td>
               <td style="font-size:.75rem">${d.scheduled_at ? d.scheduled_at.substring(0,16) : '—'}</td>
-              <td>${actionButtons(d)}</td>
+              <td>${actionButtons(d)} <button class="btn btn-sm btn-danger" onclick="return deleteDraft(${d.id})" title="Hapus">✕</button></td>
             </tr>`).join('')}
           </table>
         </div>`
@@ -244,7 +290,8 @@ function renderProfile() {
   main.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <h2>LinkedIn Profile</h2>
-      <button class="btn btn-sm" onclick="return loadSuggestions()">AI Suggestions</button>
+      <button class="btn btn-sm btn-primary" onclick="return generateSuggestions()">Generate Suggestions</button>
+      <button class="btn btn-sm" onclick="return loadSuggestions()">Lihat Tersimpan</button>
     </div>
     <div class="card">
       <div class="card-title">${esc(p.personal_info?.display_name||'Name not set')}</div>
@@ -267,6 +314,18 @@ function renderProfile() {
   `;
 }
 
+async function generateSuggestions() {
+  main.innerHTML = '<div class="loader"><div class="spinner"></div><p>Menganalisis profil & menghasilkan saran...</p></div>';
+  try {
+    const r = await fetch('/api/profile/optimize', { method: 'POST' });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    await loadSuggestions();
+  } catch(e) {
+    main.innerHTML = `<div class="empty"><h2>Error</h2><p>${e.message}</p></div>`;
+  }
+}
+
 async function loadSuggestions() {
   main.innerHTML = '<div class="loader"><div class="spinner"></div><p>Analyzing profile...</p></div>';
   try {
@@ -276,18 +335,26 @@ async function loadSuggestions() {
     main.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <h2>Profile Suggestions</h2>
+        <button class="btn btn-sm btn-primary" onclick="return generateSuggestions()">Generate Baru</button>
         <button class="btn btn-sm" onclick="return route('profile')">Back</button>
       </div>
       ${suggestions.length === 0 ? '<div class="empty"><h2>No Suggestions</h2><p>AI optimization coming soon.</p></div>' :
         suggestions.map(s => `
           <div class="card">
             <div style="color:var(--text2);font-size:.75rem;text-transform:uppercase;margin-bottom:4px">${esc(s.field)} — <span class="status-${s.status}">${s.status}</span></div>
-            <div style="margin:8px 0;padding:8px;background:var(--bg);border-radius:var(--radius)">
-              <div style="font-size:.75rem;color:var(--text3)">Suggested:</div>
+            ${s.old_text ? `<div style="margin:8px 0;padding:8px;background:var(--bg);border-radius:var(--radius);opacity:.6">
+              <div style="font-size:.75rem;color:var(--text3)">Saat ini:</div>
+              ${esc(s.old_text)}
+            </div>` : ''}
+            <div style="margin:8px 0;padding:8px;background:var(--bg2);border-radius:var(--radius)">
+              <div style="font-size:.75rem;color:var(--green)">Saran:</div>
               ${esc(s.new_text)}
             </div>
             <div style="font-size:.8rem;color:var(--text2)">${esc(s.reason)}</div>
-            ${s.status === 'pending' ? `<div style="margin-top:8px"><button class="btn btn-sm btn-success" onclick="return approveSuggestion(${s.id})">Approve</button></div>` : ''}
+            ${s.status === 'pending' ? `<div style="margin-top:8px;display:flex;gap:8px">
+              <button class="btn btn-sm btn-success" onclick="return approveSuggestion(${s.id})">Approve</button>
+              <button class="btn btn-sm" onclick="return rejectSuggestion(${s.id})">Tolak</button>
+            </div>` : ''}
           </div>
         `).join('')
       }
@@ -299,6 +366,11 @@ async function loadSuggestions() {
 
 async function approveSuggestion(id) {
   await fetch('/api/profile/suggestion/'+id+'/approve', {method:'POST'});
+  await loadSuggestions();
+}
+
+async function rejectSuggestion(id) {
+  await fetch('/api/profile/suggestion/'+id+'/reject', {method:'POST'});
   await loadSuggestions();
 }
 

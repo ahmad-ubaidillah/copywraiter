@@ -2,7 +2,7 @@
   "personal_info": {
     "full_name": "",
     "display_name": "",
-    "headline": "",
+    "headline": "Digital Marketing Specialist | Membantu Startup Naikkan Brand & Penjualan dengan Strategi yang Terukur",
     "location": "Indonesia",
     "industry": "Information Technology & Services"
   },
@@ -16,8 +16,14 @@
   "skills": [],
   "certifications": [],
   "languages": [
-    { "language": "Indonesia", "proficiency": "Native" },
-    { "language": "English", "proficiency": "Professional" }
+    {
+      "language": "Indonesia",
+      "proficiency": "Native"
+    },
+    {
+      "language": "English",
+      "proficiency": "Professional"
+    }
   ],
   "urls": {
     "github": "",
