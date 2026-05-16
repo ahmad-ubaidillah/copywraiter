@@ -27,13 +27,13 @@ class VariationsRequest(BaseModel):
 @router.post("/run")
 async def run_workflow(req: RunRequest, db: Session = Depends(get_db)) -> Any:
     wf = get_content_workflow(get_session=lambda: db)
-    return wf.run(topic=req.topic, language=req.language, user_id=req.user_id)
+    return await wf.run(topic=req.topic, language=req.language, user_id=req.user_id)
 
 
 @router.post("/variations")
 async def run_variations(req: VariationsRequest, db: Session = Depends(get_db)) -> Any:
     wf = get_content_workflow(get_session=lambda: db)
-    return wf.run_with_variations(topic=req.topic, language=req.language, user_id=req.user_id)
+    return await wf.run_with_variations(topic=req.topic, language=req.language, user_id=req.user_id)
 
 
 @router.get("/log")

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -15,7 +14,7 @@ router = APIRouter(prefix="/repliz", tags=["Repliz"])
 
 @router.get("/", response_model=list[ReplizRead])
 async def list_repliz(
-    user_id: uuid.UUID = Query(...),
+    user_id: str = Query(...),
     status_filter: str | None = Query(None, alias="status"),
     tone: str | None = None,
     skip: int = Query(0, ge=0),
@@ -35,7 +34,7 @@ async def list_repliz(
 
 
 @router.get("/{repliz_id}", response_model=ReplizRead)
-async def get_repliz(repliz_id: uuid.UUID, db: Session = Depends(get_db)) -> Any:
+async def get_repliz(repliz_id: str, db: Session = Depends(get_db)) -> Any:
     """Get a single generated reply by ID."""
     reply = db.query(Repliz).filter(Repliz.id == repliz_id).first()
     if not reply:
@@ -46,7 +45,7 @@ async def get_repliz(repliz_id: uuid.UUID, db: Session = Depends(get_db)) -> Any
 @router.post("/", response_model=ReplizRead, status_code=status.HTTP_201_CREATED)
 async def create_repliz(
     payload: ReplizCreate,
-    user_id: uuid.UUID = Query(...),
+    user_id: str = Query(...),
     db: Session = Depends(get_db),
 ) -> Any:
     """Create a new generated reply."""
@@ -59,7 +58,7 @@ async def create_repliz(
 
 @router.put("/{repliz_id}", response_model=ReplizRead)
 async def update_repliz(
-    repliz_id: uuid.UUID,
+    repliz_id: str,
     payload: ReplizUpdate,
     db: Session = Depends(get_db),
 ) -> Any:
@@ -77,7 +76,7 @@ async def update_repliz(
 
 
 @router.delete("/{repliz_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_repliz(repliz_id: uuid.UUID, db: Session = Depends(get_db)) -> None:
+async def delete_repliz(repliz_id: str, db: Session = Depends(get_db)) -> None:
     """Delete a generated reply."""
     reply = db.query(Repliz).filter(Repliz.id == repliz_id).first()
     if not reply:

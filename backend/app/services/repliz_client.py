@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -78,6 +79,7 @@ class ReplizClient:
         scheduled_at: str | None = None,
         topic: str = "",
         title: str = "",
+        replies: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         medias = []
         if media_url:
@@ -101,11 +103,13 @@ class ReplizClient:
                 "collaborators": [],
                 "music": {"id": "", "artist": "", "name": "", "thumbnail": ""},
             },
-            "replies": [],
+            "replies": replies or [],
             "accountId": account_id,
         }
         if scheduled_at:
             payload["scheduleAt"] = scheduled_at
+        else:
+            payload["scheduleAt"] = datetime.now(timezone.utc).isoformat()
 
         try:
             resp = httpx.post(

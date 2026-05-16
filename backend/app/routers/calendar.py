@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from datetime import datetime
 from typing import Any
 
@@ -26,7 +25,7 @@ class SlotRequest(BaseModel):
 
 @router.get("/")
 async def get_calendar(
-    user_id: uuid.UUID = Query(...),
+    user_id: str = Query(...),
     month: int | None = Query(None, ge=1, le=12),
     year: int | None = Query(None),
     db: Session = Depends(get_db),
@@ -76,7 +75,7 @@ async def reorder_post(
 @router.post("/slot")
 async def create_slot(
     req: SlotRequest,
-    user_id: uuid.UUID = Query(...),
+    user_id: str = Query(...),
     db: Session = Depends(get_db),
 ) -> Any:
     scheduled_at = datetime.fromisoformat(f"{req.date}T{req.time}:00")
@@ -98,7 +97,7 @@ async def create_slot(
 
 
 @router.delete("/slot/{post_id}", status_code=204)
-async def delete_slot(post_id: uuid.UUID, db: Session = Depends(get_db)) -> None:
+async def delete_slot(post_id: str, db: Session = Depends(get_db)) -> None:
     post = db.query(Post).filter(Post.id == post_id).first()
     if not post:
         raise HTTPException(status_code=404, detail="Slot not found")

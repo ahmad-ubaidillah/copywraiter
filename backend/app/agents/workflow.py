@@ -35,7 +35,7 @@ class ContentWorkflow:
         self._get_session = get_session
         self._log: list[WorkflowLogEntry] = []
 
-    def run(
+    async def run(
         self,
         topic: str,
         language: str = "en",
@@ -45,7 +45,7 @@ class ContentWorkflow:
         self._add_log("workflow", "info", f"Starting workflow for topic: {topic}")
 
         try:
-            research_summary = self._research.search_summary(topic)
+            research_summary = await self._research.search_summary_async(topic)
             self._add_log("research", "success", f"Research complete: {len(research_summary)} chars")
         except Exception as exc:
             self._add_log("research", "error", str(exc))
@@ -60,7 +60,7 @@ class ContentWorkflow:
 
         try:
             db = self._get_session() if self._get_session else None
-            generation = self._copywriter.generate(
+            generation = await self._copywriter.generate(
                 topic,
                 platform="linkedin",
                 framework=strategy["framework"],
@@ -85,7 +85,7 @@ class ContentWorkflow:
             "status": "success",
         }
 
-    def run_with_variations(
+    async def run_with_variations(
         self,
         topic: str,
         language: str = "en",
@@ -95,7 +95,7 @@ class ContentWorkflow:
         self._add_log("workflow", "info", f"Starting variation workflow for topic: {topic}")
 
         try:
-            research_summary = self._research.search_summary(topic)
+            research_summary = await self._research.search_summary_async(topic)
             self._add_log("research", "success", f"Research complete: {len(research_summary)} chars")
         except Exception as exc:
             self._add_log("research", "error", str(exc))
@@ -125,7 +125,7 @@ class ContentWorkflow:
             (alt_framework, alt_hook, "B"),
         ]):
             try:
-                result = self._copywriter.generate(
+                result = await self._copywriter.generate(
                     topic,
                     platform="linkedin",
                     framework=fw,

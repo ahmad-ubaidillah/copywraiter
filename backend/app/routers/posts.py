@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -15,7 +14,7 @@ router = APIRouter(prefix="/posts", tags=["Posts"])
 
 @router.get("/", response_model=list[PostRead])
 async def list_posts(
-    user_id: uuid.UUID = Query(...),
+    user_id: str = Query(...),
     platform: str | None = None,
     status_filter: str | None = Query(None, alias="status"),
     skip: int = Query(0, ge=0),
@@ -35,7 +34,7 @@ async def list_posts(
 
 
 @router.get("/{post_id}", response_model=PostRead)
-async def get_post(post_id: uuid.UUID, db: Session = Depends(get_db)) -> Any:
+async def get_post(post_id: str, db: Session = Depends(get_db)) -> Any:
     """Get a single post by ID."""
     post = db.query(Post).filter(Post.id == post_id).first()
     if not post:
@@ -46,7 +45,7 @@ async def get_post(post_id: uuid.UUID, db: Session = Depends(get_db)) -> Any:
 @router.post("/", response_model=PostRead, status_code=status.HTTP_201_CREATED)
 async def create_post(
     payload: PostCreate,
-    user_id: uuid.UUID = Query(...),
+    user_id: str = Query(...),
     db: Session = Depends(get_db),
 ) -> Any:
     """Create a new post."""
@@ -59,7 +58,7 @@ async def create_post(
 
 @router.put("/{post_id}", response_model=PostRead)
 async def update_post(
-    post_id: uuid.UUID,
+    post_id: str,
     payload: PostUpdate,
     db: Session = Depends(get_db),
 ) -> Any:
@@ -77,7 +76,7 @@ async def update_post(
 
 
 @router.delete("/{post_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_post(post_id: uuid.UUID, db: Session = Depends(get_db)) -> None:
+async def delete_post(post_id: str, db: Session = Depends(get_db)) -> None:
     """Delete a post."""
     post = db.query(Post).filter(Post.id == post_id).first()
     if not post:

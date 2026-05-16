@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.database import engine, Base, get_db
+from app.database import Base, engine
 from app.routers import (
     agent,
     drafts,
@@ -31,24 +32,63 @@ from app.routers import (
     template,
     platforms,
 )
+from app.scheduler import scheduler_service
+from config import settings as app_settings
+
+# ── Logging setup ────────────────────────────────────────────────────────────
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    level=logging.DEBUG if app_settings.DEBUG else logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
 )
+
+logger = logging.getLogger(__name__)
+
+# ── Lifespan ─────────────────────────────────────────────────────────────────
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
-    yield
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    logger.info("=== %s starting up ===", app_settings.APP_NAME)
 
+    # ── Startup ──────────────────────────────────────────────────────────
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables initialised")
+    except Exception as exc:
+        logger.warning("Database init skipped (may already exist or not needed): %s", exc)
+
+    try:
+        scheduler_service.start()
+        logger.info("APScheduler started")
+    except Exception as exc:
+        logger.warning("Scheduler start skipped: %s", exc)
+
+    yield  # ── Application runs here ──
+
+    # ── Shutdown ─────────────────────────────────────────────────────────
+    logger.info("=== %s shutting down ===", app_settings.APP_NAME)
+
+    try:
+        await scheduler_service.stop(wait=True)
+    except Exception as exc:
+        logger.warning("Scheduler stop error: %s", exc)
+
+    engine.dispose()
+    logger.info("Cleanup complete")
+
+
+# ── App factory ──────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="copywrAIter API",
-    version="1.5",
+    title=app_settings.APP_NAME,
+    description="Autonomous Research & Copywriting Agent",
+    version="1.0.0",
     lifespan=lifespan,
 )
+
+# ── CORS ─────────────────────────────────────────────────────────────────────
 
 app.add_middleware(
     CORSMiddleware,
@@ -57,6 +97,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Router mounting ──────────────────────────────────────────────────────────
 
 # Core CRUD routers
 app.include_router(agent.router)
@@ -83,12 +125,44 @@ app.include_router(topics.router)
 app.include_router(template.router)
 app.include_router(platforms.router)
 
+# ── Base endpoints ───────────────────────────────────────────────────────────
+
 
 @app.get("/")
-async def root():
-    return {"message": "copywrAIter API", "version": "1.5"}
+async def root() -> dict[str, str]:
+    return {
+        "message": "copywrAIter API",
+        "version": "1.0.0",
+    }
 
 
 @app.get("/health")
-async def health():
+async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/status")
+async def status() -> dict[str, Any]:
+    return {
+        "app": app_settings.APP_NAME,
+        "version": "1.0.0",
+        "status": "ok",
+        "scheduler_running": scheduler_service.running,
+    }
+
+
+@app.post("/api/scheduler/trigger")
+async def trigger_scheduler() -> dict[str, Any]:
+    result = await scheduler_service.run_once_now()
+    return {
+        "status": "triggered",
+        "result": result,
+    }
+
+
+@app.post("/api/scheduler/reschedule")
+async def reschedule_scheduler() -> dict[str, Any]:
+    scheduler_service.reschedule()
+    return {
+        "status": "rescheduled",
+    }

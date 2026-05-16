@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -15,7 +14,7 @@ router = APIRouter(prefix="/linkedin", tags=["LinkedIn"])
 
 @router.get("/posts", response_model=list[LinkedInPostRead])
 async def list_linkedin_posts(
-    user_id: uuid.UUID = Query(...),
+    user_id: str = Query(...),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -33,7 +32,7 @@ async def list_linkedin_posts(
 
 
 @router.get("/posts/{post_id}", response_model=LinkedInPostRead)
-async def get_linkedin_post(post_id: uuid.UUID, db: Session = Depends(get_db)) -> Any:
+async def get_linkedin_post(post_id: str, db: Session = Depends(get_db)) -> Any:
     """Get a single LinkedIn post by ID."""
     post = db.query(LinkedInPost).filter(LinkedInPost.id == post_id).first()
     if not post:
@@ -44,7 +43,7 @@ async def get_linkedin_post(post_id: uuid.UUID, db: Session = Depends(get_db)) -
 @router.post("/posts", response_model=LinkedInPostRead, status_code=status.HTTP_201_CREATED)
 async def create_linkedin_post(
     payload: LinkedInPostCreate,
-    user_id: uuid.UUID = Query(...),
+    user_id: str = Query(...),
     db: Session = Depends(get_db),
 ) -> Any:
     """Create a new LinkedIn post record."""
@@ -57,7 +56,7 @@ async def create_linkedin_post(
 
 @router.put("/posts/{post_id}", response_model=LinkedInPostRead)
 async def update_linkedin_post(
-    post_id: uuid.UUID,
+    post_id: str,
     payload: LinkedInPostUpdate,
     db: Session = Depends(get_db),
 ) -> Any:
@@ -75,7 +74,7 @@ async def update_linkedin_post(
 
 
 @router.delete("/posts/{post_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_linkedin_post(post_id: uuid.UUID, db: Session = Depends(get_db)) -> None:
+async def delete_linkedin_post(post_id: str, db: Session = Depends(get_db)) -> None:
     """Delete a LinkedIn post record."""
     post = db.query(LinkedInPost).filter(LinkedInPost.id == post_id).first()
     if not post:

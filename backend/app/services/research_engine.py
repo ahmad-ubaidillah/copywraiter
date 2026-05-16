@@ -24,6 +24,45 @@ class ResearchProvider(ABC):
         pass
 
 
+class AIResearchProvider(ResearchProvider):
+    """Uses SumoPod AI (or any OpenAI-compatible) to generate research summaries."""
+
+    def __init__(self) -> None:
+        from services.ai_client import AIClient
+
+        self._ai = AIClient()
+
+    def search(self, query: str, max_results: int = 10) -> list[dict[str, str]]:
+        return []
+
+    async def search_async(self, query: str, max_results: int = 10) -> list[dict[str, str]]:
+        try:
+            result = await self._ai.generate(
+                prompt=(
+                    f"Buat ringkasan riset tentang topik berikut: {query}\n\n"
+                    f"Beri poin-poin penting, fakta terbaru, konteks di Indonesia, "
+                    f"dan sudut pandang yang relevan. Max 500 kata. Bahasa Indonesia."
+                ),
+                provider="custom",
+                model="qwen3.6-plus",
+                temperature=0.5,
+                max_tokens=1024,
+                system_prompt="Kamu adalah asisten riset yang memberikan informasi akurat dan terkini.",
+            )
+            content = result.get("content", "")
+            return [
+                {
+                    "title": f"AI Research: {query}",
+                    "url": "",
+                    "snippet": content[:500],
+                    "content": content[:3000],
+                }
+            ]
+        except Exception as exc:
+            logger.warning("AI research failed: %s", exc)
+            return []
+
+
 class TavilyProvider(ResearchProvider):
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
@@ -118,6 +157,7 @@ class ResearchEngine:
     def __init__(self, tavily_api_key: str | None = None) -> None:
         self._tavily_key = tavily_api_key
         self._tavily: TavilyProvider | None = None
+        self._ai_research = AIResearchProvider()
         self._crawl4ai = Crawl4AIProvider()
 
     def _get_tavily(self) -> TavilyProvider | None:
@@ -126,16 +166,47 @@ class ResearchEngine:
         return self._tavily
 
     def search(self, query: str, max_results: int = 10) -> list[dict[str, str]]:
+        # Priority: AI research → Tavily → Crawl4AI
+        # Note: AI research skipped in sync mode — use search_summary_async for AI
         tavily = self._get_tavily()
         if tavily:
             try:
                 return tavily.search(query, max_results)
             except ResearchError as exc:
                 logger.warning("Tavily failed, falling back to Crawl4AI: %s", exc)
+
+        return self._crawl4ai.search(query, max_results)
+
+    async def search_async(self, query: str, max_results: int = 10) -> list[dict[str, str]]:
+        # Priority: AI research → Tavily → Crawl4AI
+        try:
+            ai_results = await self._ai_research.search_async(query, max_results)
+            if ai_results and ai_results[0].get("content"):
+                return ai_results
+        except Exception as exc:
+            logger.warning("AI research failed (async): %s", exc)
+
+        tavily = self._get_tavily()
+        if tavily:
+            try:
+                return tavily.search(query, max_results)
+            except ResearchError as exc:
+                logger.warning("Tavily failed, falling back to Crawl4AI: %s", exc)
+
         return self._crawl4ai.search(query, max_results)
 
     def search_summary(self, query: str, max_chars: int = 3000) -> str:
         results = self.search(query, max_results=5)
+        snippets = []
+        for r in results:
+            text = r.get("content") or r.get("snippet", "")
+            if text:
+                snippets.append(text)
+        combined = "\n\n".join(snippets)
+        return combined[:max_chars]
+
+    async def search_summary_async(self, query: str, max_chars: int = 3000) -> str:
+        results = await self.search_async(query, max_results=5)
         snippets = []
         for r in results:
             text = r.get("content") or r.get("snippet", "")

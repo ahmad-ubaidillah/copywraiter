@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -29,7 +28,7 @@ async def analyze(req: AnalyzeRequest) -> Any:
 
 @router.get("/profile")
 async def get_profile(
-    user_id: uuid.UUID = Query(...),
+    user_id: str = Query(...),
     db: Session = Depends(get_db),
 ) -> Any:
     setting = db.query(Setting).filter(Setting.user_id == user_id).first()
@@ -41,7 +40,7 @@ async def get_profile(
 @router.put("/profile")
 async def update_profile(
     payload: dict[str, Any],
-    user_id: uuid.UUID = Query(...),
+    user_id: str = Query(...),
     db: Session = Depends(get_db),
 ) -> Any:
     setting = db.query(Setting).filter(Setting.user_id == user_id).first()
@@ -56,7 +55,7 @@ async def update_profile(
 @router.post("/save")
 async def analyze_and_save(
     req: SaveStyleRequest,
-    user_id: uuid.UUID = Query(...),
+    user_id: str = Query(...),
     db: Session = Depends(get_db),
 ) -> Any:
     profile = analyze_style(req.text)

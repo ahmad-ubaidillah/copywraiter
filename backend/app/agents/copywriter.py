@@ -70,13 +70,26 @@ def _build_system_prompt(platform: str, language: str = "en") -> str:
 
     tone = preset.get("tone", "professional")
     platform_name = PLATFORM_KEYS.get(platform, platform)
+    threading = preset.get("threading", False)
 
-    return (
-        f"You are an expert copywriter writing for {platform_name}. "
-        f"Tone: {tone}. "
-        f"Write content optimized for this platform's audience and conventions. "
-        f"Output only the content — no explanations, no meta-commentary."
-    )
+    lines = [
+        f"You are an expert copywriter writing for {platform_name}.",
+        f"Tone: {tone}.",
+    ]
+
+    if threading:
+        lines.extend([
+            f"This platform supports THREADING — you can write as much as you want.",
+            f"Long content will be split into multiple posts (thread).",
+            f"Each post segment is max {preset.get('max_chars_per_post', 500)} characters.",
+            f"Separate each segment with a '---THREAD_BREAK---' marker.",
+            f"Write naturally — don't hold back. If you need 10 segments, write 10.",
+        ])
+    else:
+        lines.append("Write content optimized for this platform's audience and conventions.")
+
+    lines.append("Output only the content — no explanations, no meta-commentary.")
+    return "\n".join(lines)
 
 
 def _build_user_prompt(
@@ -91,6 +104,7 @@ def _build_user_prompt(
 ) -> str:
     preset = get_preset(platform) or get_preset("linkedin")
     max_chars = preset.get("max_chars", 3000)
+    threading = preset.get("threading", False)
     hashtags = preset.get("hashtags", True)
     emoji_policy = preset.get("emoji_policy", "limited")
     structure = preset.get("structure", "")
@@ -102,11 +116,24 @@ def _build_user_prompt(
         f"TOPIK: {topic}",
         "",
         "=== PLATFORM RULES ===",
-        f"- Max characters: {max_chars}",
+    ]
+
+    if threading:
+        lines.extend([
+            "- **TIDAK ADA BATASAN PANJANG** — tulis sebanyak yang diperlukan",
+            "- Pesan panjang dipisah otomatis jadi thread chain (replies)",
+            f"- Tiap segmen maks {preset.get('max_chars_per_post', 500)} karakter",
+            "- Pisah segmen dengan marker: ---THREAD_BREAK---",
+            f"- Recommended length: {recommended}",
+        ])
+    else:
+        lines.append(f"- Max characters: {max_chars}")
+
+    lines.extend([
         f"- Recommended length: {recommended}",
         f"- Hashtags: {'Allowed' if hashtags else 'Do NOT use hashtags'}",
         f"- Emoji policy: {emoji_policy}",
-    ]
+    ])
 
     if structure:
         lines.append(f"- Structure: {structure}")
@@ -173,11 +200,20 @@ def _build_user_prompt(
     if article_context:
         lines.extend(["", "=== KONTEKS ARTIKEL ===", article_context])
 
-    lines.extend([
-        "",
-        "=== OUTPUT ===",
-        f"Langsung copy siap publish. Max {max_chars} karakter.",
-    ])
+    if threading:
+        lines.extend([
+            "",
+            "=== OUTPUT ===",
+            "Tulis semau lo, pisah tiap segmen dengan ---THREAD_BREAK---",
+            "Setiap segmen akan jadi 1 post dalam thread chain.",
+            "Segmen terakhir jangan pake THREAD_BREAK.",
+        ])
+    else:
+        lines.extend([
+            "",
+            "=== OUTPUT ===",
+            f"Langsung copy siap publish. Max {max_chars} karakter.",
+        ])
 
     return "\n".join(lines)
 
@@ -234,7 +270,7 @@ class CopywriterAgent:
     def __init__(self, ai_client: AIClient | None = None) -> None:
         self._ai = ai_client or AIClient()
 
-    def generate(
+    async def generate(
         self,
         topic: str,
         *,
@@ -277,10 +313,16 @@ class CopywriterAgent:
 
         preset = get_preset(platform) or get_preset("linkedin")
         max_chars = preset.get("max_chars", 3000)
-        max_tokens = max(512, min(max_chars // 2, 4096))
+        threading = preset.get("threading", False)
+
+        # For threading platforms, allow much longer output
+        if threading:
+            max_tokens = 4096
+        else:
+            max_tokens = max(512, min(max_chars // 2, 4096))
 
         try:
-            result = self._ai.generate(
+            result = await self._ai.generate(
                 prompt=user_prompt,
                 system_prompt=system_prompt,
                 temperature=0.8,
@@ -293,11 +335,21 @@ class CopywriterAgent:
         raw_content = result["content"]
         content = _sanitize_copy(raw_content, platform)
 
+        # Handle thread segments
+        segments = []
+        if threading and "---THREAD_BREAK---" in content:
+            raw_segments = content.split("---THREAD_BREAK---")
+            segments = [s.strip() for s in raw_segments if s.strip()]
+        else:
+            segments = [content] if content.strip() else []
+
         output: dict[str, Any] = {
             "topic": topic,
             "platform": platform,
             "content": content,
+            "segments": segments,
             "chars": len(content),
+            "segment_count": len(segments),
             "framework": framework,
             "hook_type": hook_type,
             "ai_provider": result["provider"],
@@ -313,7 +365,7 @@ class CopywriterAgent:
                 content=content,
                 plain_text=content,
                 source="ai-generated",
-                metadata={
+                metadata_json={
                     "platform": platform,
                     "framework": framework,
                     "hook_type": hook_type,
@@ -329,7 +381,7 @@ class CopywriterAgent:
 
         return output
 
-    def generate_with_frameworks(
+    async def generate_with_frameworks(
         self,
         topic: str,
         *,
@@ -346,7 +398,7 @@ class CopywriterAgent:
         results: list[dict[str, Any]] = []
         for fw in frameworks:
             try:
-                result = self.generate(
+                result = await self.generate(
                     topic,
                     platform=platform,
                     framework=fw,

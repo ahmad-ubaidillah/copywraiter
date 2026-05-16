@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -15,7 +14,7 @@ router = APIRouter(prefix="/style-references", tags=["Style References"])
 
 @router.get("/", response_model=list[StyleReferenceRead])
 async def list_style_references(
-    user_id: uuid.UUID = Query(...),
+    user_id: str = Query(...),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -32,7 +31,7 @@ async def list_style_references(
 
 
 @router.get("/{ref_id}", response_model=StyleReferenceRead)
-async def get_style_reference(ref_id: uuid.UUID, db: Session = Depends(get_db)) -> Any:
+async def get_style_reference(ref_id: str, db: Session = Depends(get_db)) -> Any:
     ref = db.query(StyleReference).filter(StyleReference.id == ref_id).first()
     if not ref:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Style reference not found")
@@ -42,7 +41,7 @@ async def get_style_reference(ref_id: uuid.UUID, db: Session = Depends(get_db)) 
 @router.post("/", response_model=StyleReferenceRead, status_code=status.HTTP_201_CREATED)
 async def create_style_reference(
     payload: StyleReferenceCreate,
-    user_id: uuid.UUID = Query(...),
+    user_id: str = Query(...),
     db: Session = Depends(get_db),
 ) -> Any:
     ref = StyleReference(user_id=user_id, **payload.model_dump())
@@ -54,7 +53,7 @@ async def create_style_reference(
 
 @router.put("/{ref_id}", response_model=StyleReferenceRead)
 async def update_style_reference(
-    ref_id: uuid.UUID,
+    ref_id: str,
     payload: StyleReferenceUpdate,
     db: Session = Depends(get_db),
 ) -> Any:
@@ -69,7 +68,7 @@ async def update_style_reference(
 
 
 @router.delete("/{ref_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_style_reference(ref_id: uuid.UUID, db: Session = Depends(get_db)) -> None:
+async def delete_style_reference(ref_id: str, db: Session = Depends(get_db)) -> None:
     ref = db.query(StyleReference).filter(StyleReference.id == ref_id).first()
     if not ref:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Style reference not found")

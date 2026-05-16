@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -15,7 +14,7 @@ router = APIRouter(prefix="/niches", tags=["Niches"])
 
 @router.get("/", response_model=list[NicheRead])
 async def list_niches(
-    user_id: uuid.UUID = Query(...),
+    user_id: str = Query(...),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -32,7 +31,7 @@ async def list_niches(
 
 
 @router.get("/{niche_id}", response_model=NicheRead)
-async def get_niche(niche_id: uuid.UUID, db: Session = Depends(get_db)) -> Any:
+async def get_niche(niche_id: str, db: Session = Depends(get_db)) -> Any:
     """Get a single niche by ID."""
     niche = db.query(Niche).filter(Niche.id == niche_id).first()
     if not niche:
@@ -43,7 +42,7 @@ async def get_niche(niche_id: uuid.UUID, db: Session = Depends(get_db)) -> Any:
 @router.post("/", response_model=NicheRead, status_code=status.HTTP_201_CREATED)
 async def create_niche(
     payload: NicheCreate,
-    user_id: uuid.UUID = Query(...),
+    user_id: str = Query(...),
     db: Session = Depends(get_db),
 ) -> Any:
     """Create a new niche."""
@@ -56,7 +55,7 @@ async def create_niche(
 
 @router.put("/{niche_id}", response_model=NicheRead)
 async def update_niche(
-    niche_id: uuid.UUID,
+    niche_id: str,
     payload: NicheUpdate,
     db: Session = Depends(get_db),
 ) -> Any:
@@ -74,7 +73,7 @@ async def update_niche(
 
 
 @router.delete("/{niche_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_niche(niche_id: uuid.UUID, db: Session = Depends(get_db)) -> None:
+async def delete_niche(niche_id: str, db: Session = Depends(get_db)) -> None:
     """Delete a niche."""
     niche = db.query(Niche).filter(Niche.id == niche_id).first()
     if not niche:

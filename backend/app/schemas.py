@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -182,7 +182,7 @@ class DraftCreate(BaseModel):
     plain_text: Optional[str] = None
     niche_id: Optional[uuid.UUID] = None
     source: Optional[str] = None
-    metadata: Optional[dict[str, Any]] = None
+    metadata_json: Optional[dict[str, Any]] = Field(None, validation_alias="metadata")
 
 
 class DraftUpdate(BaseModel):
@@ -191,7 +191,7 @@ class DraftUpdate(BaseModel):
     plain_text: Optional[str] = None
     niche_id: Optional[uuid.UUID] = None
     source: Optional[str] = None
-    metadata: Optional[dict[str, Any]] = None
+    metadata_json: Optional[dict[str, Any]] = Field(None, validation_alias="metadata")
     is_archived: Optional[bool] = None
 
 
@@ -203,11 +203,12 @@ class DraftRead(TimestampMixin):
     plain_text: Optional[str] = None
     niche_id: Optional[uuid.UUID] = None
     source: Optional[str] = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_json")
     is_archived: bool
 
     class Config:
         from_attributes = True
+        populate_by_name = True
 
 
 # ── Post ─────────────────────────────────────────────────────────────────────
@@ -257,10 +258,11 @@ class PostRead(TimestampMixin):
     published_at: Optional[datetime] = None
     niche_id: Optional[uuid.UUID] = None
     draft_id: Optional[uuid.UUID] = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="extra_data")
 
     class Config:
         from_attributes = True
+        populate_by_name = True
 
 
 # ── Trend ────────────────────────────────────────────────────────────────────
@@ -334,10 +336,11 @@ class LinkedInPostRead(TimestampMixin):
     shares_count: float
     impressions_count: float
     posted_at: Optional[datetime] = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="extra_data")
 
     class Config:
         from_attributes = True
+        populate_by_name = True
 
 
 # ── Repliz ───────────────────────────────────────────────────────────────────
@@ -367,10 +370,11 @@ class ReplizRead(TimestampMixin):
     tone: str
     status: str
     posted_at: Optional[datetime] = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="extra_data")
 
     class Config:
         from_attributes = True
+        populate_by_name = True
 
 
 # ── VaultItem ────────────────────────────────────────────────────────────────
@@ -403,10 +407,11 @@ class VaultItemRead(TimestampMixin):
     tags: list[str] = Field(default_factory=list)
     category: Optional[str] = None
     is_favorite: bool
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="extra_data")
 
     class Config:
         from_attributes = True
+        populate_by_name = True
 
 
 # ── StyleReference ───────────────────────────────────────────────────────────

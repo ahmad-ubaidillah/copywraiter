@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -15,7 +14,7 @@ router = APIRouter(prefix="/vault", tags=["Vault"])
 
 @router.get("/", response_model=list[VaultItemRead])
 async def list_vault_items(
-    user_id: uuid.UUID = Query(...),
+    user_id: str = Query(...),
     category: str | None = None,
     is_favorite: bool | None = None,
     tag: str | None = Query(None, description="Filter by tag"),
@@ -38,7 +37,7 @@ async def list_vault_items(
 
 
 @router.get("/{item_id}", response_model=VaultItemRead)
-async def get_vault_item(item_id: uuid.UUID, db: Session = Depends(get_db)) -> Any:
+async def get_vault_item(item_id: str, db: Session = Depends(get_db)) -> Any:
     """Get a single vault item by ID."""
     item = db.query(VaultItem).filter(VaultItem.id == item_id).first()
     if not item:
@@ -49,7 +48,7 @@ async def get_vault_item(item_id: uuid.UUID, db: Session = Depends(get_db)) -> A
 @router.post("/", response_model=VaultItemRead, status_code=status.HTTP_201_CREATED)
 async def create_vault_item(
     payload: VaultItemCreate,
-    user_id: uuid.UUID = Query(...),
+    user_id: str = Query(...),
     db: Session = Depends(get_db),
 ) -> Any:
     """Create a new vault item."""
@@ -62,7 +61,7 @@ async def create_vault_item(
 
 @router.put("/{item_id}", response_model=VaultItemRead)
 async def update_vault_item(
-    item_id: uuid.UUID,
+    item_id: str,
     payload: VaultItemUpdate,
     db: Session = Depends(get_db),
 ) -> Any:
@@ -80,7 +79,7 @@ async def update_vault_item(
 
 
 @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_vault_item(item_id: uuid.UUID, db: Session = Depends(get_db)) -> None:
+async def delete_vault_item(item_id: str, db: Session = Depends(get_db)) -> None:
     """Delete a vault item."""
     item = db.query(VaultItem).filter(VaultItem.id == item_id).first()
     if not item:

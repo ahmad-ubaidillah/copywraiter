@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -14,7 +13,7 @@ router = APIRouter(prefix="/settings", tags=["Settings"])
 
 
 @router.get("/{user_id}", response_model=SettingRead)
-async def get_settings(user_id: uuid.UUID, db: Session = Depends(get_db)) -> Any:
+async def get_settings(user_id: str, db: Session = Depends(get_db)) -> Any:
     """Get settings for a user."""
     settings = db.query(Setting).filter(Setting.user_id == user_id).first()
     if not settings:
@@ -24,7 +23,7 @@ async def get_settings(user_id: uuid.UUID, db: Session = Depends(get_db)) -> Any
 
 @router.post("/{user_id}", response_model=SettingRead, status_code=status.HTTP_201_CREATED)
 async def create_settings(
-    user_id: uuid.UUID,
+    user_id: str,
     payload: SettingCreate,
     db: Session = Depends(get_db),
 ) -> Any:
@@ -42,7 +41,7 @@ async def create_settings(
 
 @router.put("/{user_id}", response_model=SettingRead)
 async def update_settings(
-    user_id: uuid.UUID,
+    user_id: str,
     payload: SettingUpdate,
     db: Session = Depends(get_db),
 ) -> Any:
@@ -60,7 +59,7 @@ async def update_settings(
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_settings(user_id: uuid.UUID, db: Session = Depends(get_db)) -> None:
+async def delete_settings(user_id: str, db: Session = Depends(get_db)) -> None:
     """Delete a user's settings."""
     settings = db.query(Setting).filter(Setting.user_id == user_id).first()
     if not settings:

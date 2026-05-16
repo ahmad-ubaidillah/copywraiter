@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     AI_TEMPERATURE: float = 0.7
     AI_MAX_TOKENS: int = 4096
 
+    # ── Server ───────────────────────────────────────────────────────
+    PORT: int = 8080
+
+    # ── Distribution (Repliz API — Basic Auth) ───────────────────────
+    REPLIZ_ACCESS_KEY: str = ""
+    REPLIZ_SECRET_KEY: str = ""
+    REPLIZ_BASE_URL: str = "https://api.repliz.com"
+
     # ── Derived / computed ───────────────────────────────────────────
     BASE_DIR: Path = Path(__file__).resolve().parent
 

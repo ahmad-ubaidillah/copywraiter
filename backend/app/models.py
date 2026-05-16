@@ -112,7 +112,7 @@ class Draft(Base):
     plain_text = Column(Text, nullable=True)
     niche_id = Column(String(36), ForeignKey("niches.id", ondelete="SET NULL"), nullable=True)
     source = Column(String(50), nullable=True)
-    metadata = Column(JSON, nullable=True, default=dict)
+    metadata_json = Column("metadata", JSON, nullable=True, default=dict)
     is_archived = Column(Boolean, default=False)
     created_at = Column(DateTime, default=utcnow, nullable=False)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
@@ -138,7 +138,7 @@ class Post(Base):
     published_at = Column(DateTime, nullable=True)
     niche_id = Column(String(36), ForeignKey("niches.id", ondelete="SET NULL"), nullable=True)
     draft_id = Column(String(36), ForeignKey("drafts.id", ondelete="SET NULL"), nullable=True)
-    metadata = Column(JSON, nullable=True, default=dict)
+    extra_data = Column("metadata", JSON, nullable=True, default=dict)
     created_at = Column(DateTime, default=utcnow, nullable=False)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
@@ -177,7 +177,7 @@ class LinkedInPost(Base):
     shares_count = Column(Float, default=0)
     impressions_count = Column(Float, default=0)
     posted_at = Column(DateTime, nullable=True)
-    metadata = Column(JSON, nullable=True, default=dict)
+    extra_data = Column("metadata", JSON, nullable=True, default=dict)
     created_at = Column(DateTime, default=utcnow, nullable=False)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
@@ -195,7 +195,7 @@ class Repliz(Base):
     tone = Column(String(50), default="professional")
     status = Column(String(50), default="draft")
     posted_at = Column(DateTime, nullable=True)
-    metadata = Column(JSON, nullable=True, default=dict)
+    extra_data = Column("metadata", JSON, nullable=True, default=dict)
     created_at = Column(DateTime, default=utcnow, nullable=False)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
@@ -214,7 +214,7 @@ class VaultItem(Base):
     tags = Column(JSON, nullable=True, default=list)
     category = Column(String(100), nullable=True)
     is_favorite = Column(Boolean, default=False)
-    metadata = Column(JSON, nullable=True, default=dict)
+    extra_data = Column("metadata", JSON, nullable=True, default=dict)
     created_at = Column(DateTime, default=utcnow, nullable=False)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 

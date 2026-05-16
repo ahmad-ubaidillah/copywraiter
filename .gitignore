@@ -3,6 +3,33 @@ __pycache__/
 *.pyc
 .env
 credential.txt
-data/*.db
 logs/*.log
 .webcache/
+
+# Database files & dirs
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Next.js
+.next/
+next-env.d.ts
+package-lock.json
+
+# Backup scripts
+scripts/

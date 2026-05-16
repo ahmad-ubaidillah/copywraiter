@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -40,7 +39,7 @@ async def list_trends(
 
 
 @router.get("/{trend_id}", response_model=TrendRead)
-async def get_trend(trend_id: uuid.UUID, db: Session = Depends(get_db)) -> Any:
+async def get_trend(trend_id: str, db: Session = Depends(get_db)) -> Any:
     """Get a single trend by ID."""
     trend = db.query(Trend).filter(Trend.id == trend_id).first()
     if not trend:
@@ -63,7 +62,7 @@ async def create_trend(
 
 @router.put("/{trend_id}", response_model=TrendRead)
 async def update_trend(
-    trend_id: uuid.UUID,
+    trend_id: str,
     payload: TrendUpdate,
     db: Session = Depends(get_db),
 ) -> Any:
@@ -81,7 +80,7 @@ async def update_trend(
 
 
 @router.delete("/{trend_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_trend(trend_id: uuid.UUID, db: Session = Depends(get_db)) -> None:
+async def delete_trend(trend_id: str, db: Session = Depends(get_db)) -> None:
     """Delete a trend."""
     trend = db.query(Trend).filter(Trend.id == trend_id).first()
     if not trend:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -41,7 +40,7 @@ async def get_trending_topics(
 
 @router.get("/custom")
 async def get_custom_topics(
-    user_id: uuid.UUID = Query(...),
+    user_id: str = Query(...),
     db: Session = Depends(get_db),
 ) -> Any:
     niches = db.query(Niche).filter(Niche.user_id == user_id, Niche.is_active == True).all()
@@ -59,7 +58,7 @@ async def get_custom_topics(
 @router.post("/custom", status_code=201)
 async def create_custom_topic(
     req: CustomTopicRequest,
-    user_id: uuid.UUID = Query(...),
+    user_id: str = Query(...),
     db: Session = Depends(get_db),
 ) -> Any:
     niche = Niche(
@@ -81,8 +80,8 @@ async def create_custom_topic(
 
 @router.delete("/custom/{niche_id}", status_code=204)
 async def delete_custom_topic(
-    niche_id: uuid.UUID,
-    user_id: uuid.UUID = Query(...),
+    niche_id: str,
+    user_id: str = Query(...),
     db: Session = Depends(get_db),
 ) -> None:
     niche = db.query(Niche).filter(Niche.id == niche_id, Niche.user_id == user_id).first()

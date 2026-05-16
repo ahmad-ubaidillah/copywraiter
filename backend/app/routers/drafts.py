@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -15,7 +14,7 @@ router = APIRouter(prefix="/drafts", tags=["Drafts"])
 
 @router.get("/", response_model=list[DraftRead])
 async def list_drafts(
-    user_id: uuid.UUID = Query(...),
+    user_id: str = Query(...),
     is_archived: bool | None = None,
     source: str | None = None,
     skip: int = Query(0, ge=0),
@@ -35,7 +34,7 @@ async def list_drafts(
 
 
 @router.get("/{draft_id}", response_model=DraftRead)
-async def get_draft(draft_id: uuid.UUID, db: Session = Depends(get_db)) -> Any:
+async def get_draft(draft_id: str, db: Session = Depends(get_db)) -> Any:
     """Get a single draft by ID."""
     draft = db.query(Draft).filter(Draft.id == draft_id).first()
     if not draft:
@@ -46,7 +45,7 @@ async def get_draft(draft_id: uuid.UUID, db: Session = Depends(get_db)) -> Any:
 @router.post("/", response_model=DraftRead, status_code=status.HTTP_201_CREATED)
 async def create_draft(
     payload: DraftCreate,
-    user_id: uuid.UUID = Query(...),
+    user_id: str = Query(...),
     db: Session = Depends(get_db),
 ) -> Any:
     """Create a new draft."""
@@ -59,7 +58,7 @@ async def create_draft(
 
 @router.put("/{draft_id}", response_model=DraftRead)
 async def update_draft(
-    draft_id: uuid.UUID,
+    draft_id: str,
     payload: DraftUpdate,
     db: Session = Depends(get_db),
 ) -> Any:
@@ -77,7 +76,7 @@ async def update_draft(
 
 
 @router.delete("/{draft_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_draft(draft_id: uuid.UUID, db: Session = Depends(get_db)) -> None:
+async def delete_draft(draft_id: str, db: Session = Depends(get_db)) -> None:
     """Delete a draft."""
     draft = db.query(Draft).filter(Draft.id == draft_id).first()
     if not draft:
